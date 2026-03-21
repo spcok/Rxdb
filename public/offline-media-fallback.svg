@@ -1,0 +1,5 @@
+<svg width="200" height="200" viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="200" height="200" fill="#F1F5F9"/>
+  <path d="M60 140L100 100L140 140M140 60L100 100L60 60" stroke="#CBD5E1" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="100" y="170" font-family="sans-serif" font-size="14" fill="#94A3B8" text-anchor="middle">OFFLINE</text>
+</svg>

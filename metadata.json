@@ -1,0 +1,5 @@
+{
+  "name": " KOA-Beta-PWA - rxdb",
+  "description": "Clean room transplant of the Kent Owl Academy Management System (V2) with mocked auth and local-first architecture.\n\n",
+  "requestFramePermissions": []
+}

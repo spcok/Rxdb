@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#0f172a" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <link rel="apple-touch-icon" href="/icon-192.png" />
+    <title>Kent Owl Academy Management System</title>
+  <script>
+    // 🚨 EMERGENCY NUCLEAR RESET SWITCH 🚨
+    // If the URL contains "?reset=true", obliterate all local data before React loads.
+    if (window.location.search.includes('reset=true')) {
+      console.warn('🚨 Executing Nuclear Reset...');
+
+      // 1. Wipe Local & Session Storage
+      localStorage.clear();
+      sessionStorage.clear();
+
+      // 2. Wipe IndexedDB (Dexie)
+      if ('indexedDB' in window) {
+        indexedDB.databases().then((dbs) => {
+          dbs.forEach((db) => {
+            if (db.name) {
+              indexedDB.deleteDatabase(db.name);
+              console.log(`🗑️ Deleted database: ${db.name}`);
+            }
+          });
+        }).catch(() => {
+          // Fallback for older browsers
+          indexedDB.deleteDatabase('KentOwlAcademyDB');
+          indexedDB.deleteDatabase('KOA_Database'); 
+        });
+      }
+
+      // 3. Unregister all global Service Workers
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.getRegistrations().then(function(registrations) {
+          for(let registration of registrations) {
+            registration.unregister();
+          }
+        });
+      }
+
+      alert("Nuclear Reset Complete. The app will now reload.");
+      window.location.href = window.location.pathname; // Reload cleanly
+    }
+  </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

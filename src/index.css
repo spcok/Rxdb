@@ -1,0 +1,10 @@
+@import "tailwindcss";
+
+@layer base {
+  /* Prevent iOS Safari auto-zoom on inputs */
+  @media (max-width: 768px) {
+    input, textarea, select {
+      /* Removed font-size: 16px !important; to allow text-sm/text-xs to work */
+    }
+  }
+}
