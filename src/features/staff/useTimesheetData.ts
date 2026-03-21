@@ -10,8 +10,11 @@ export function useTimesheetData() {
   useEffect(() => {
     if (!db) return;
 
-    const sub = db.timesheets.find({
-      selector: { is_deleted: { $eq: false } },
+    const sub = db.staff_records.find({
+      selector: { 
+        is_deleted: { $eq: false },
+        record_type: { $eq: 'timesheets' }
+      },
       sort: [{ date: 'desc' }]
     }).$.subscribe(docs => {
       setTimesheets(docs.map(d => d.toJSON() as Timesheet));
@@ -24,6 +27,7 @@ export function useTimesheetData() {
   const clockIn = async (staff_name: string) => {
     const newTimesheet: Timesheet = {
       id: uuidv4(),
+      record_type: 'timesheets',
       staff_name,
       date: new Date().toISOString().split('T')[0],
       clock_in: new Date().toISOString(),
@@ -31,15 +35,16 @@ export function useTimesheetData() {
       updated_at: new Date().toISOString(),
       is_deleted: false
     };
-    await db.timesheets.upsert(newTimesheet);
+    await db.staff_records.upsert(newTimesheet);
   };
 
   const clockOut = async (id: string) => {
-    const timesheetDoc = await db.timesheets.findOne(id).exec();
+    const timesheetDoc = await db.staff_records.findOne(id).exec();
     if (timesheetDoc) {
       const timesheet = timesheetDoc.toJSON();
-      await db.timesheets.upsert({
+      await db.staff_records.upsert({
         ...timesheet,
+        record_type: 'timesheets',
         clock_out: new Date().toISOString(),
         status: TimesheetStatus.COMPLETED,
         updated_at: new Date().toISOString()
@@ -48,10 +53,11 @@ export function useTimesheetData() {
   };
 
   const getCurrentlyClockedInStaff = async () => {
-    const active = await db.timesheets.find({
+    const active = await db.staff_records.find({
       selector: { 
         status: { $eq: TimesheetStatus.ACTIVE },
-        is_deleted: { $eq: false }
+        is_deleted: { $eq: false },
+        record_type: { $eq: 'timesheets' }
       }
     }).exec();
     return active.map(t => t.staff_name);
@@ -61,18 +67,20 @@ export function useTimesheetData() {
     const newTimesheet: Timesheet = {
       ...timesheet,
       id: uuidv4(),
+      record_type: 'timesheets',
       updated_at: new Date().toISOString(),
       is_deleted: false
     } as Timesheet;
-    await db.timesheets.upsert(newTimesheet);
+    await db.staff_records.upsert(newTimesheet);
   };
 
   const deleteTimesheet = async (id: string) => {
-    const timesheetDoc = await db.timesheets.findOne(id).exec();
+    const timesheetDoc = await db.staff_records.findOne(id).exec();
     if (timesheetDoc) {
       const timesheet = timesheetDoc.toJSON();
-      await db.timesheets.upsert({
+      await db.staff_records.upsert({
         ...timesheet,
+        record_type: 'timesheets',
         is_deleted: true,
         updated_at: new Date().toISOString()
       });

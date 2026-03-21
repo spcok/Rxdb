@@ -13,18 +13,27 @@ export function useMedicalData() {
     if (!db) return;
 
     const subs = [
-      db.medical_logs.find({
-        selector: { is_deleted: { $eq: false } },
+      db.clinical_records.find({
+        selector: { 
+          is_deleted: { $eq: false },
+          record_type: { $eq: 'medical_logs' }
+        },
         sort: [{ date: 'desc' }]
       }).$.subscribe(docs => setClinicalNotes(docs.map(d => d.toJSON() as ClinicalNote))),
 
-      db.mar_charts.find({
-        selector: { is_deleted: { $eq: false } },
+      db.clinical_records.find({
+        selector: { 
+          is_deleted: { $eq: false },
+          record_type: { $eq: 'mar_charts' }
+        },
         sort: [{ start_date: 'desc' }]
       }).$.subscribe(docs => setMarCharts(docs.map(d => d.toJSON() as MARChart))),
 
-      db.quarantine_records.find({
-        selector: { is_deleted: { $eq: false } },
+      db.clinical_records.find({
+        selector: { 
+          is_deleted: { $eq: false },
+          record_type: { $eq: 'quarantine_records' }
+        },
         sort: [{ start_date: 'desc' }]
       }).$.subscribe(docs => setQuarantineRecords(docs.map(d => d.toJSON() as QuarantineRecord))),
 
@@ -44,16 +53,18 @@ export function useMedicalData() {
     const newNote: ClinicalNote = {
       ...note,
       id: crypto.randomUUID(),
+      record_type: 'medical_logs',
       animal_name: animalDoc?.name || 'Unknown',
       updated_at: new Date().toISOString(),
       is_deleted: false
     } as ClinicalNote;
-    await db.medical_logs.upsert(newNote);
+    await db.clinical_records.upsert(newNote);
   };
 
   const updateClinicalNote = async (note: ClinicalNote) => {
-    await db.medical_logs.upsert({
+    await db.clinical_records.upsert({
       ...note,
+      record_type: 'medical_logs',
       updated_at: new Date().toISOString()
     });
   };
@@ -63,28 +74,31 @@ export function useMedicalData() {
     const newChart: MARChart = {
       ...chart,
       id: crypto.randomUUID(),
+      record_type: 'mar_charts',
       animal_name: animalDoc?.name || 'Unknown',
       administered_dates: [],
       status: 'Active',
       updated_at: new Date().toISOString(),
       is_deleted: false
     } as MARChart;
-    await db.mar_charts.upsert(newChart);
+    await db.clinical_records.upsert(newChart);
   };
 
   const updateMarChart = async (chart: MARChart) => {
-    await db.mar_charts.upsert({
+    await db.clinical_records.upsert({
       ...chart,
+      record_type: 'mar_charts',
       updated_at: new Date().toISOString()
     });
   };
 
   const signOffDose = async (chartId: string, dateIso: string) => {
-    const chartDoc = await db.mar_charts.findOne(chartId).exec();
+    const chartDoc = await db.clinical_records.findOne(chartId).exec();
     if (chartDoc) {
       const chart = chartDoc.toJSON();
-      await db.mar_charts.upsert({
+      await db.clinical_records.upsert({
         ...chart,
+        record_type: 'mar_charts',
         administered_dates: [...chart.administered_dates, dateIso],
         updated_at: new Date().toISOString()
       });
@@ -96,17 +110,19 @@ export function useMedicalData() {
     const newRecord: QuarantineRecord = {
       ...record,
       id: crypto.randomUUID(),
+      record_type: 'quarantine_records',
       animal_name: animalDoc?.name || 'Unknown',
       status: 'Active',
       updated_at: new Date().toISOString(),
       is_deleted: false
     } as QuarantineRecord;
-    await db.quarantine_records.upsert(newRecord);
+    await db.clinical_records.upsert(newRecord);
   };
 
   const updateQuarantineRecord = async (record: QuarantineRecord) => {
-    await db.quarantine_records.upsert({
+    await db.clinical_records.upsert({
       ...record,
+      record_type: 'quarantine_records',
       updated_at: new Date().toISOString()
     });
   };

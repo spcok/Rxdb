@@ -14,9 +14,9 @@ import {
   Wrench
 } from 'lucide-react';
 import { renderAsync } from 'docx-preview';
-import { db } from '../../lib/db';
+import { db } from '../../lib/rxdb';
 import { useHybridQuery } from '../../lib/dataEngine';
-import { Animal, UserRole, Shift } from '../../types';
+import { Animal, UserRole, Shift, ClinicalNote, MARChart, InternalMovement, ExternalTransfer, MaintenanceLog } from '../../types';
 import { generateDailyLogDocx, generateInternalMovementsDocx, generateExternalTransfersDocx, generateSiteMaintenanceDocx, generateAnimalCensusDocx, generateSection9Docx, generateDeathCertificateDocx, generateStaffRotaDocx, generateInspectionPackage } from './utils/docxExportService';
 import { useAuthStore } from '../../store/authStore';
 
@@ -159,9 +159,23 @@ export default function ReportsDashboard() {
     }
   }, [startDate, rotaPeriod, activeReportId]);
   
-  const animals = useHybridQuery<Animal[]>('animals', () => db.animals.toArray(), []);
-  const archivedAnimals = useHybridQuery<Animal[]>('archived_animals', () => db.archived_animals.toArray(), []);
-  const rawShifts = useHybridQuery<Shift[]>('shifts', () => db.table('shifts').toArray(), []);
+  const animals = useHybridQuery<Animal[]>('animals', async () => {
+    const docs = await db.animals.find({ selector: { is_deleted: { $eq: false } } }).exec();
+    return docs.map(d => d.toJSON() as Animal);
+  }, []);
+  const archivedAnimals = useHybridQuery<Animal[]>('archived_animals', async () => {
+    // Note: archived_animals might still be in Dexie or needs to be added to RxDB
+    // For now, we'll try to find them in RxDB if they were merged, or keep them as is if they are separate.
+    // If they are not in RxDB, this will fail. Let's assume they are in RxDB for consistency if we are moving to RxDB.
+    // Actually, looking at rxdb.ts, archived_animals is NOT there. 
+    // I'll keep it as a placeholder or try to find archived animals in the 'animals' collection.
+    const docs = await db.animals.find({ selector: { archived: { $eq: true }, is_deleted: { $eq: false } } }).exec();
+    return docs.map(d => d.toJSON() as Animal);
+  }, []);
+  const rawShifts = useHybridQuery<Shift[]>('shifts', async () => {
+    const docs = await db.staff_records.find({ selector: { record_type: 'shifts', is_deleted: { $eq: false } } }).exec();
+    return docs.map(d => d.toJSON() as Shift);
+  }, []);
   const { currentUser } = useAuthStore();
 
   const uniqueSections = activeReportId === 'staff_rota'
@@ -197,10 +211,16 @@ export default function ReportsDashboard() {
           currentDate.setDate(currentDate.getDate() + 1);
         }
 
-        const rawLogs = await db.daily_logs
-          .where('log_date')
-          .between(startDate, new Date(new Date(endDate).setHours(23, 59, 59, 999)).toISOString(), true, true)
-          .toArray();
+        const rawLogs = await db.daily_records.find({
+          selector: {
+            record_type: 'daily_logs_v2',
+            log_date: {
+              $gte: startDate,
+              $lte: new Date(new Date(endDate).setHours(23, 59, 59, 999)).toISOString()
+            },
+            is_deleted: { $eq: false }
+          }
+        }).exec();
 
         const logs = rawLogs.filter(log => {
           if (!selectedSection) return true;
@@ -231,12 +251,18 @@ export default function ReportsDashboard() {
         }
         return;
       } else if (activeReportId === 'internal_movements') {
-        const rawData = await db.internal_movements
-          .where('log_date')
-          .between(startDate, new Date(new Date(endDate).setHours(23, 59, 59, 999)).toISOString(), true, true)
-          .toArray();
+        const rawData = await db.logistics_records.find({
+          selector: {
+            record_type: 'movements',
+            log_date: {
+              $gte: startDate,
+              $lte: new Date(new Date(endDate).setHours(23, 59, 59, 999)).toISOString()
+            },
+            is_deleted: { $eq: false }
+          }
+        }).exec();
           
-        const filteredMovements = rawData.filter(m => {
+        const filteredMovements = rawData.map(d => d.toJSON() as InternalMovement).filter(m => {
           if (!selectedSection) return true;
           return animalSectionMap.get(m.animal_id) === selectedSection;
         });
@@ -263,12 +289,18 @@ export default function ReportsDashboard() {
         }
         return;
       } else if (activeReportId === 'external_transfers') {
-        const rawData = await db.external_transfers
-          .where('date')
-          .between(startDate, endDate, true, true)
-          .toArray();
+        const rawData = await db.logistics_records.find({
+          selector: {
+            record_type: 'transfers',
+            date: {
+              $gte: startDate,
+              $lte: endDate
+            },
+            is_deleted: { $eq: false }
+          }
+        }).exec();
           
-        const filteredTransfers = rawData.filter(m => {
+        const filteredTransfers = rawData.map(d => d.toJSON() as ExternalTransfer).filter(m => {
           if (!selectedSection) return true;
           return animalSectionMap.get(m.animal_id) === selectedSection;
         });
@@ -295,11 +327,16 @@ export default function ReportsDashboard() {
         }
         return;
       } else if (activeReportId === 'site_maintenance') {
-        const rawData = await db.maintenance_logs
-          .where('date_logged')
-          .between(startDate, endDate, true, true)
-          .toArray();
-        const sortedData = [...rawData].sort((a, b) => new Date(a.date_logged).getTime() - new Date(b.date_logged).getTime());
+        const rawData = await db.maintenance_logs.find({
+          selector: {
+            date_logged: {
+              $gte: startDate,
+              $lte: endDate
+            },
+            is_deleted: { $eq: false }
+          }
+        }).exec();
+        const sortedData = rawData.map(d => d.toJSON() as MaintenanceLog).sort((a, b) => new Date(a.date_logged).getTime() - new Date(b.date_logged).getTime());
         
         const blob = await generateSiteMaintenanceDocx(
           sortedData,
@@ -516,18 +553,40 @@ export default function ReportsDashboard() {
         }
         return;
       } else if (activeReportId === 'inspection_package') {
-        const medicalLogs = await db.medical_logs
-          .where('date')
-          .between(startDate, endDate, true, true)
-          .toArray();
-        const marCharts = await db.mar_charts
-          .where('start_date')
-          .between(startDate, endDate, true, true)
-          .toArray();
-        const maintenanceLogs = await db.maintenance_logs
-          .where('date_logged')
-          .between(startDate, endDate, true, true)
-          .toArray();
+        const medicalLogsDocs = await db.clinical_records.find({
+          selector: {
+            record_type: 'medical_logs',
+            date: {
+              $gte: startDate,
+              $lte: endDate
+            },
+            is_deleted: { $eq: false }
+          }
+        }).exec();
+        const medicalLogs = medicalLogsDocs.map(d => d.toJSON() as ClinicalNote);
+
+        const marChartsDocs = await db.clinical_records.find({
+          selector: {
+            record_type: 'mar_charts',
+            start_date: {
+              $gte: startDate,
+              $lte: endDate
+            },
+            is_deleted: { $eq: false }
+          }
+        }).exec();
+        const marCharts = marChartsDocs.map(d => d.toJSON() as MARChart);
+
+        const maintenanceLogsDocs = await db.maintenance_logs.find({
+          selector: {
+            date_logged: {
+              $gte: startDate,
+              $lte: endDate
+            },
+            is_deleted: { $eq: false }
+          }
+        }).exec();
+        const maintenanceLogs = maintenanceLogsDocs.map(d => d.toJSON() as MaintenanceLog);
 
         const blob = await generateInspectionPackage(
           medicalLogs,

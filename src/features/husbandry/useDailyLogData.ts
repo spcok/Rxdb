@@ -11,10 +11,11 @@ export const useDailyLogData = (viewDate: string, activeCategory: string) => {
   useEffect(() => {
     if (!db) return;
 
-    const sub = db.daily_logs_v2.find({
+    const sub = db.daily_records.find({
       selector: { 
         log_date: { $eq: viewDate },
-        is_deleted: { $eq: false }
+        is_deleted: { $eq: false },
+        record_type: { $eq: 'daily_logs_v2' }
       }
     }).$.subscribe(docs => {
       setAllLogs(docs.map(d => d.toJSON() as LogEntry));
@@ -34,10 +35,11 @@ export const useDailyLogData = (viewDate: string, activeCategory: string) => {
     const payload = {
       ...entry,
       id: entry.id || crypto.randomUUID(),
+      record_type: 'daily_logs_v2',
       updated_at: new Date().toISOString(),
       is_deleted: false
     };
-    await db.daily_logs_v2.upsert(payload);
+    await db.daily_records.upsert(payload);
   }, []);
 
   const filteredAnimals = useMemo(() => {

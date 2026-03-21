@@ -28,10 +28,14 @@ import SiteMaintenance from './features/safety/tabs/SiteMaintenance';
 import ReportsDashboard from './features/reports/ReportsDashboard';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { initDatabase, startReplication, stopReplication, RxDatabase } from './lib/rxdb';
+import { isSupabaseConfigured } from './lib/supabase';
 
 export default function App() {
   const { initialize, isLoading, session } = useAuthStore();
   const [db, setDb] = useState<RxDatabase | null>(null);
+  const [supabaseError] = useState<string | null>(() => 
+    isSupabaseConfigured() ? null : 'Supabase environment variables (VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY) are missing. Some features may not work.'
+  );
   useInactivityTimer();
 
   useEffect(() => {
@@ -39,7 +43,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (db && session) {
+    if (db && session && isSupabaseConfigured()) {
       startReplication(db);
     } else {
       stopReplication();
@@ -77,6 +81,11 @@ export default function App() {
   return (
     <ErrorBoundary>
       <AppProvider>
+        {supabaseError && (
+          <div className="fixed top-0 left-0 right-0 z-[9999] bg-red-600 text-white text-[10px] py-1 px-4 text-center font-bold uppercase tracking-widest animate-pulse">
+            ⚠️ {supabaseError}
+          </div>
+        )}
         <LockScreen />
         <BrowserRouter>
           <Routes>

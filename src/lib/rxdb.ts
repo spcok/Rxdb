@@ -2,189 +2,71 @@ import { createRxDatabase, addRxPlugin, RxDatabase, RxCollection } from 'rxdb';
 import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie';
 import { RxDBDevModePlugin } from 'rxdb/plugins/dev-mode';
 import { wrappedValidateAjvStorage } from 'rxdb/plugins/validate-ajv';
-import { wrappedValidateAjvStorage } from 'rxdb/plugins/validate-ajv'; // Ensure AJV is installed
 import { replicateSupabase, RxSupabaseReplicationState } from 'rxdb/plugins/replication-supabase';
 import { supabase } from './supabase';
 
-// Add plugins
 addRxPlugin(RxDBDevModePlugin);
 
-// Fix SC39 & Strict Mode: No "primary: true", yes "maxLength"
-const baseProperties = {
-  id: { type: 'string', maxLength: 100 },
-  updated_at: { type: 'string' },
-  is_deleted: { type: 'boolean' },
-  record_type: { type: 'string' } // Discriminator for the Librarian
+// The Librarian's Master Map: 8 Collections -> 24 Supabase Tables
+const LIBRARIAN_MAP: Record<string, string[]> = {
+  animals: ['animals', 'archived_animals'],
+  daily_records: ['daily_logs', 'daily_rounds'],
+  clinical_records: ['medical_logs', 'mar_charts', 'quarantine_records'],
+  logistics_records: ['internal_movements', 'external_transfers'],
+  staff_records: ['shifts', 'holidays', 'timesheets'],
+  safety_records: ['incidents', 'safety_drills', 'first_aid_logs', 'maintenance_logs'],
+  admin_records: ['users', 'organisations', 'role_permissions', 'contacts', 'zla_documents', 'bug_reports', 'operational_lists'],
+  tasks: ['tasks']
 };
 
-// --- Consolidated Schemas ---
-
-const animalSchema = {
-  version: 0,
-  primaryKey: 'id',
-  type: 'object',
-  properties: {
-    ...baseProperties,
-    name: { type: 'string' },
-    species: { type: 'string' },
-    category: { type: 'string' },
-    location: { type: 'string' },
-    hazard_rating: { type: 'string' },
-    is_venomous: { type: 'boolean' },
-    weight_unit: { type: 'string' },
-    census_count: { type: 'number' },
-    dob: { type: 'string' },
-    is_dob_unknown: { type: 'boolean' },
-    sex: { type: 'string' },
-    microchip_id: { type: 'string' },
-    disposition_status: { type: 'string' },
-    archived: { type: 'boolean' },
-    is_quarantine: { type: 'boolean' },
-  },
-  required: ['id']
-};
-
-const dailyRecordSchema = {
-  version: 0,
-  primaryKey: 'id',
-  type: 'object',
-  properties: {
-    ...baseProperties,
-    // Daily Logs fields
-    animal_id: { type: 'string' },
-    log_type: { type: 'string' },
-    log_date: { type: 'string' },
-    value: { type: 'string' },
-    weight_grams: { type: 'number' },
-    // Daily Rounds fields
-    date: { type: 'string' },
-    shift: { type: 'string' },
-    section: { type: 'string' },
-    status: { type: 'string' },
-    completed_by: { type: 'string' },
-  },
-  required: ['id', 'record_type']
-};
-
-const clinicalRecordSchema = {
-  version: 0,
-  primaryKey: 'id',
-  type: 'object',
-  properties: {
-    ...baseProperties,
-    animal_id: { type: 'string' },
-    animal_name: { type: 'string' },
-    date: { type: 'string' },
-    // Notes fields
-    note_type: { type: 'string' },
-    note_text: { type: 'string' },
-    bcs: { type: 'number' },
-    // MAR fields
-    medication: { type: 'string' },
-    dosage: { type: 'string' },
-    frequency: { type: 'string' },
-    start_date: { type: 'string' },
-    end_date: { type: 'string' },
-    administered_dates: { type: 'array', items: { type: 'string' } },
-    // Quarantine fields
-    reason: { type: 'string' },
-    isolation_notes: { type: 'string' },
-    staff_initials: { type: 'string' },
-  },
-  required: ['id', 'record_type']
-};
-
-const logisticsRecordSchema = {
-  version: 0,
-  primaryKey: 'id',
-  type: 'object',
-  properties: {
-    ...baseProperties,
-    animal_id: { type: 'string' },
-    animal_name: { type: 'string' },
-    log_date: { type: 'string' },
-    date: { type: 'string' },
-    movement_type: { type: 'string' },
-    transfer_type: { type: 'string' },
-    source_location: { type: 'string' },
-    destination_location: { type: 'string' },
-    institution: { type: 'string' },
-    notes: { type: 'string' },
-  },
-  required: ['id', 'record_type']
-};
-
-const staffRecordSchema = {
-  version: 0,
-  primaryKey: 'id',
-  type: 'object',
-  properties: {
-    ...baseProperties,
-    user_id: { type: 'string' },
-    staff_name: { type: 'string' },
-    date: { type: 'string' },
-    shift_type: { type: 'string' },
-    start_date: { type: 'string' },
-    end_date: { type: 'string' },
-    clock_in: { type: 'string' },
-    clock_out: { type: 'string' },
-    status: { type: 'string' },
-  },
-  required: ['id', 'record_type']
-};
-
-// ... (Other schemas like husbandry_logs, incidents, tasks remain 1-to-1 but remove "primary: true")
-
+let dbPromise: Promise<RxDatabase> | null = null;
 let replicationStates: RxSupabaseReplicationState<any>[] = [];
-export let db: RxDatabase;
 
-export async function initDatabase() {
-  if (db) return db;
+const createSchema = (name: string, properties: any = {}) => ({
+  title: `${name} schema`,
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string', maxLength: 100 },
+    updated_at: { type: 'string' },
+    is_deleted: { type: 'boolean' },
+    record_type: { type: 'string' }, // Discriminator for Supabase routing
+    ...properties
+  },
+  required: ['id', 'record_type']
+});
 
-  db = await createRxDatabase({
-    name: 'animaldb',
-    storage: wrappedValidateAjvStorage({ storage: getRxStorageDexie() }),
-    ignoreDuplicate: true,
-  });
+export const initDatabase = async () => {
+  if (dbPromise) return dbPromise;
 
-  await db.addCollections({
-    animals: { schema: animalSchema },
-    daily_records: { schema: dailyRecordSchema }, // Combined daily_logs_v2 & daily_rounds
-    clinical_records: { schema: clinicalRecordSchema }, // Combined medical, mar, quarantine
-    logistics_records: { schema: logisticsRecordSchema }, // Combined movements, transfers
-    staff_records: { schema: staffRecordSchema }, // Combined shifts, holidays, timesheets
-    husbandry_logs: { schema: { ...husbandryLogSchema, properties: { ...husbandryLogSchema.properties, id: { type: 'string', maxLength: 100 } } } },
-    tasks: { schema: taskSchema },
-    operational_lists: { schema: operationalListSchema },
-    incidents: { schema: incidentSchema },
-    maintenance_logs: { schema: maintenanceLogSchema },
-    safety_drills: { schema: safetyDrillSchema },
-    first_aid_logs: { schema: firstAidLogSchema },
-  });
+  dbPromise = (async () => {
+    const db = await createRxDatabase({
+      name: 'animaldb_v4',
+      storage: wrappedValidateAjvStorage({ storage: getRxStorageDexie() }),
+      ignoreDuplicate: true,
+    });
 
-  return db;
-}
+    await db.addCollections({
+      animals: { schema: createSchema('animals', { name: { type: 'string' }, species: { type: 'string' } }) },
+      daily_records: { schema: createSchema('daily', { date: { type: 'string' }, value: { type: 'string' } }) },
+      clinical_records: { schema: createSchema('clinical', { animal_id: { type: 'string' }, note_text: { type: 'string' } }) },
+      logistics_records: { schema: createSchema('logistics', { animal_id: { type: 'string' }, notes: { type: 'string' } }) },
+      staff_records: { schema: createSchema('staff', { staff_name: { type: 'string' }, status: { type: 'string' } }) },
+      safety_records: { schema: createSchema('safety', { description: { type: 'string' }, severity: { type: 'string' } }) },
+      admin_records: { schema: createSchema('admin', { type: { type: 'string' }, value: { type: 'string' } }) },
+      tasks: { schema: createSchema('tasks', { title: { type: 'string' }, completed: { type: 'boolean' } }) }
+    });
 
-export async function startReplication(db: RxDatabase) {
-  // Mapping logic: Local Collection -> Array of Supabase Tables
-  const librarianMap: Record<string, string[]> = {
-    animals: ['animals'],
-    daily_records: ['daily_logs_v2', 'daily_rounds'],
-    clinical_records: ['medical_logs', 'mar_charts', 'quarantine_records'],
-    logistics_records: ['movements', 'transfers'],
-    staff_records: ['shifts', 'holidays', 'timesheets'],
-    husbandry_logs: ['husbandry_logs'],
-    tasks: ['tasks'],
-    operational_lists: ['operational_lists'],
-    incidents: ['incidents'],
-    maintenance_logs: ['maintenance_logs'],
-    safety_drills: ['safety_drills'],
-    first_aid_logs: ['first_aid_logs']
-  };
+    return db;
+  })();
 
-  for (const [colName, tables] of Object.entries(librarianMap)) {
+  return dbPromise;
+};
+
+export const startReplication = async (db: RxDatabase) => {
+  for (const [colName, tables] of Object.entries(LIBRARIAN_MAP)) {
     const collection = db.collections[colName];
-
     for (const tableName of tables) {
       const replicationState = replicateSupabase({
         collection,
@@ -193,20 +75,17 @@ export async function startReplication(db: RxDatabase) {
         tableName: tableName,
         pull: {
           batchSize: 100,
-          // Librarian adds the label when pulling from a specific shelf
           modifier: (doc) => ({ ...doc, record_type: tableName }),
         },
         push: {
-          // Librarian only pushes records that belong on this shelf
           filter: (doc) => doc.record_type === tableName,
         },
         live: true,
       });
-
       replicationStates.push(replicationState);
     }
   }
-}
+};
 
 export function stopReplication() {
   replicationStates.forEach(s => s.cancel());

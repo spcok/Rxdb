@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../../lib/db';
+import { db as dexieDb } from '../../lib/db';
+import { db as rxdb } from '../../lib/rxdb';
 import { supabase } from '../../lib/supabase';
 import { forceHydrateFromCloud } from '../../lib/syncEngine';
 
@@ -117,14 +117,35 @@ export function useSystemHealthData() {
     };
   }, []);
 
-  const tableCounts = useLiveQuery(async () => {
-    return {
-      animals: await db.animals.count(),
-      users: await db.users.count(),
-      daily_logs: await db.daily_logs.count(),
-      tasks: await db.tasks.count(),
-      medical_logs: await db.medical_logs.count()
+  const [tableCounts, setTableCounts] = useState({
+    animals: 0,
+    users: 0,
+    daily_logs: 0,
+    tasks: 0,
+    medical_logs: 0
+  });
+
+  useEffect(() => {
+    if (!rxdb) return;
+
+    const updateCounts = async () => {
+      try {
+        const counts = {
+          animals: await rxdb.animals.find().exec().then(docs => docs.length),
+          users: await dexieDb.users.count(), // Users might still be in Dexie
+          daily_logs: await rxdb.daily_records.find({ selector: { record_type: 'daily_logs_v2' } }).exec().then(docs => docs.length),
+          tasks: await rxdb.tasks.find().exec().then(docs => docs.length),
+          medical_logs: await rxdb.clinical_records.find({ selector: { record_type: 'medical_logs' } }).exec().then(docs => docs.length)
+        };
+        setTableCounts(counts);
+      } catch (e) {
+        console.error('Failed to update counts', e);
+      }
     };
+
+    updateCounts();
+    const interval = setInterval(updateCounts, 10000); // Update every 10s
+    return () => clearInterval(interval);
   }, []);
 
   const executeForceRebuild = async () => {
@@ -143,7 +164,7 @@ export function useSystemHealthData() {
   const executeClearQueue = async () => {
     setIsClearingQueue(true);
     try {
-      await db.sync_queue.clear();
+      await dexieDb.sync_queue.clear();
       return true;
     } catch (error) {
       console.error("Failed to clear queue:", error);
@@ -174,7 +195,7 @@ export function useSystemHealthData() {
         
         // Wipe Local IndexedDB Cache
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const dbTable = db[table as keyof typeof db] as any;
+        const dbTable = dexieDb[table as keyof typeof dexieDb] as any;
         if (dbTable && dbTable.clear) {
           await dbTable.clear();
         }
@@ -192,7 +213,7 @@ export function useSystemHealthData() {
   };
 
   return { 
-    isOnline, isHydrating, pwaHealth, tableCounts: tableCounts || { animals: 0, users: 0, daily_logs: 0, tasks: 0, medical_logs: 0 },
+    isOnline, isHydrating, pwaHealth, tableCounts,
     executeForceRebuild, executeClearQueue, isClearingQueue,
     executeWipeData, isWipingData, wipeProgress
   };

@@ -33,17 +33,19 @@ export function useDailyRoundData(viewDate: string) {
                 selector: { is_deleted: { $eq: false } }
             }).$.subscribe(docs => setAllAnimals(docs.map(d => d.toJSON() as Animal))),
 
-            db.daily_logs_v2.find({
+            db.daily_records.find({
                 selector: { 
                     log_date: { $eq: viewDate },
-                    is_deleted: { $eq: false }
+                    is_deleted: { $eq: false },
+                    record_type: { $eq: 'daily_logs_v2' }
                 }
             }).$.subscribe(docs => setLiveLogs(docs.map(d => d.toJSON() as LogEntry))),
 
-            db.daily_rounds.find({
+            db.daily_records.find({
                 selector: { 
                     date: { $eq: viewDate },
-                    is_deleted: { $eq: false }
+                    is_deleted: { $eq: false },
+                    record_type: { $eq: 'daily_rounds' }
                 }
             }).$.subscribe(docs => {
                 setLiveRounds(docs.map(d => d.toJSON() as DailyRound));
@@ -210,6 +212,7 @@ export function useDailyRoundData(viewDate: string) {
         try {
             const round: DailyRound = {
                 id: currentRoundId || uuidv4(),
+                record_type: 'daily_rounds',
                 date: viewDate,
                 shift: roundType,
                 section: activeTab,
@@ -221,7 +224,7 @@ export function useDailyRoundData(viewDate: string) {
                 notes: generalNotes
             };
             
-            await db.daily_rounds.upsert(round);
+            await db.daily_records.upsert(round);
         } catch (error) {
             console.error('Failed to sign off round:', error);
         } finally {

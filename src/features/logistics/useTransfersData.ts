@@ -10,8 +10,11 @@ export function useTransfersData() {
   useEffect(() => {
     if (!db) return;
 
-    const sub = db.transfers.find({
-      selector: { is_deleted: { $eq: false } },
+    const sub = db.logistics_records.find({
+      selector: { 
+        is_deleted: { $eq: false },
+        record_type: { $eq: 'transfers' }
+      },
       sort: [{ date: 'desc' }]
     }).$.subscribe(docs => {
       setTransfers(docs.map(d => d.toJSON() as ExternalTransfer));
@@ -25,10 +28,11 @@ export function useTransfersData() {
     const newTransfer: ExternalTransfer = {
       ...transfer,
       id: uuidv4(),
+      record_type: 'transfers',
       updated_at: new Date().toISOString(),
       is_deleted: false
     } as ExternalTransfer;
-    await db.transfers.upsert(newTransfer);
+    await db.logistics_records.upsert(newTransfer);
   };
 
   return {

@@ -10,8 +10,11 @@ export function useHolidayData() {
   useEffect(() => {
     if (!db) return;
 
-    const sub = db.holidays.find({
-      selector: { is_deleted: { $eq: false } },
+    const sub = db.staff_records.find({
+      selector: { 
+        is_deleted: { $eq: false },
+        record_type: { $eq: 'holidays' }
+      },
       sort: [{ start_date: 'desc' }]
     }).$.subscribe(docs => {
       setHolidays(docs.map(d => d.toJSON() as Holiday));
@@ -25,18 +28,20 @@ export function useHolidayData() {
     const newHoliday: Holiday = {
       ...holiday,
       id: uuidv4(),
+      record_type: 'holidays',
       updated_at: new Date().toISOString(),
       is_deleted: false
     } as Holiday;
-    await db.holidays.upsert(newHoliday);
+    await db.staff_records.upsert(newHoliday);
   };
 
   const deleteHoliday = async (id: string) => {
-    const holidayDoc = await db.holidays.findOne(id).exec();
+    const holidayDoc = await db.staff_records.findOne(id).exec();
     if (holidayDoc) {
       const holiday = holidayDoc.toJSON();
-      await db.holidays.upsert({
+      await db.staff_records.upsert({
         ...holiday,
+        record_type: 'holidays',
         is_deleted: true,
         updated_at: new Date().toISOString()
       });

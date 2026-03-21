@@ -44,10 +44,20 @@ export function useMissingRecordsData() {
       db.animals.find({ selector: { is_deleted: { $eq: false } } }).$.subscribe(docs => {
         setAnimals(docs.map(d => d.toJSON() as Animal));
       }),
-      db.daily_logs_v2.find({ selector: { is_deleted: { $eq: false } } }).$.subscribe(docs => {
+      db.daily_records.find({ 
+        selector: { 
+          is_deleted: { $eq: false },
+          record_type: { $eq: 'daily_logs_v2' }
+        } 
+      }).$.subscribe(docs => {
         setDailyLogs(docs.map(d => d.toJSON() as LogEntry));
       }),
-      db.medical_logs.find({ selector: { is_deleted: { $eq: false } } }).$.subscribe(docs => {
+      db.clinical_records.find({ 
+        selector: { 
+          is_deleted: { $eq: false },
+          record_type: { $eq: 'medical_logs' }
+        } 
+      }).$.subscribe(docs => {
         setMedicalLogs(docs.map(d => d.toJSON() as ClinicalNote));
         setIsLoading(false);
       })

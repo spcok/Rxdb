@@ -10,8 +10,11 @@ export function useMovementsData() {
   useEffect(() => {
     if (!db) return;
 
-    const sub = db.movements.find({
-      selector: { is_deleted: { $eq: false } },
+    const sub = db.logistics_records.find({
+      selector: { 
+        is_deleted: { $eq: false },
+        record_type: { $eq: 'movements' }
+      },
       sort: [{ log_date: 'desc' }]
     }).$.subscribe(docs => {
       setMovements(docs.map(d => d.toJSON() as InternalMovement));
@@ -25,11 +28,12 @@ export function useMovementsData() {
     const newMovement: InternalMovement = {
       ...movement,
       id: uuidv4(),
+      record_type: 'movements',
       created_by: 'SYS', // Mock user
       updated_at: new Date().toISOString(),
       is_deleted: false
     } as InternalMovement;
-    await db.movements.upsert(newMovement);
+    await db.logistics_records.upsert(newMovement);
   };
 
   return {

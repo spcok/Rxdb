@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { Session, User as SupabaseUser, AuthError } from '@supabase/supabase-js';
-import { supabase } from '../lib/supabase';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { User, UserRole } from '../types';
 import { db } from '../lib/db';
 import { mutateOnlineFirst } from '../lib/dataEngine';
@@ -26,6 +26,9 @@ export const useAuthStore = create<AuthState>((set) => ({
   isUiLocked: false,
 
   login: async (email, password) => {
+    if (!isSupabaseConfigured()) {
+      return { error: { message: 'Supabase is not configured', status: 500 } as AuthError };
+    }
     const { error, data } = await supabase.auth.signInWithPassword({
       email,
       password,
@@ -39,7 +42,9 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   logout: async () => {
-    await supabase.auth.signOut();
+    if (isSupabaseConfigured()) {
+      await supabase.auth.signOut();
+    }
   },
 
   setUiLocked: (locked) => set({ isUiLocked: locked }),
@@ -47,6 +52,23 @@ export const useAuthStore = create<AuthState>((set) => ({
   initialize: async () => {
     set({ isLoading: true });
     
+    if (!isSupabaseConfigured()) {
+      console.warn('🛠️ [Auth Store] Supabase is not configured. Falling back to local cache.');
+      try {
+        const localUser = await db.users.toCollection().first();
+        if (localUser) {
+          const mockUser = { id: localUser.id, email: localUser.email } as SupabaseUser;
+          const mockSession = { user: mockUser, access_token: 'offline-token' } as Session;
+          set({ session: mockSession, user: mockUser, currentUser: localUser, isLoading: false });
+        } else {
+          set({ session: null, user: null, currentUser: null, isLoading: false });
+        }
+      } catch {
+        set({ session: null, user: null, currentUser: null, isLoading: false });
+      }
+      return;
+    }
+
     try {
       // 1. Try to get session from local storage immediately (fast)
       const { data: { session: localSession } } = await supabase.auth.getSession();
