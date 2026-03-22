@@ -25,6 +25,7 @@ export function useTimesheetData() {
   }, []);
 
   const clockIn = async (staff_name: string) => {
+    if (!db) throw new Error('Database not initialized');
     const newTimesheet: Timesheet = {
       id: uuidv4(),
       record_type: 'timesheets',
@@ -39,6 +40,7 @@ export function useTimesheetData() {
   };
 
   const clockOut = async (id: string) => {
+    if (!db) throw new Error('Database not initialized');
     const timesheetDoc = await db.staff_records.findOne(id).exec();
     if (timesheetDoc) {
       const timesheet = timesheetDoc.toJSON();
@@ -53,6 +55,7 @@ export function useTimesheetData() {
   };
 
   const getCurrentlyClockedInStaff = async () => {
+    if (!db) return [];
     const active = await db.staff_records.find({
       selector: { 
         status: { $eq: TimesheetStatus.ACTIVE },
@@ -64,6 +67,7 @@ export function useTimesheetData() {
   };
 
   const addTimesheet = async (timesheet: Omit<Timesheet, 'id'>) => {
+    if (!db) throw new Error('Database not initialized');
     const newTimesheet: Timesheet = {
       ...timesheet,
       id: uuidv4(),
@@ -75,6 +79,7 @@ export function useTimesheetData() {
   };
 
   const deleteTimesheet = async (id: string) => {
+    if (!db) throw new Error('Database not initialized');
     const timesheetDoc = await db.staff_records.findOne(id).exec();
     if (timesheetDoc) {
       const timesheet = timesheetDoc.toJSON();

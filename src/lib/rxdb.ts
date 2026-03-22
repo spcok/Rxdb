@@ -34,155 +34,153 @@ export const initDatabase = async () => {
   dbPromise = (async () => {
     console.log('💾 [RxDB] Initializing engine (v11)...');
     
-    db = await createRxDatabase({
-      name: 'animaldb_v11', 
-      storage: wrappedValidateAjvStorage({ storage: getRxStorageDexie() }),
-      ignoreDuplicate: true,
-    });
+    try {
+      db = await createRxDatabase({
+        name: 'animaldb_v12', 
+        storage: wrappedValidateAjvStorage({ storage: getRxStorageDexie() }),
+        ignoreDuplicate: true,
+      });
+      console.log('💾 [RxDB] Database created.');
 
-    await db.addCollections({
-      animals: { 
-        schema: { 
-          version: 0, 
-          primaryKey: 'id', 
-          type: 'object', 
-          properties: { 
-            ...baseProperties, 
-            name: { type: 'string' }, 
-            species: { type: 'string' },
-            category: { type: 'string' },
-            location: { type: 'string' },
-            hazard_rating: { type: 'string' },
-            is_venomous: { type: 'boolean' },
-            archived: { type: 'boolean' }
-          }, 
-          required: ['id', 'record_type'] 
-        } 
-      },
-      admin_records: { 
-        schema: { 
-          version: 0, 
-          primaryKey: 'id', 
-          type: 'object', 
-          properties: { 
-            ...baseProperties, 
-            email: { type: 'string' },
-            name: { type: 'string' },
-            role: { type: 'string' },
-            initials: { type: 'string' },
-            permissions: { type: 'object' },
-            type: { type: 'string' },
-            value: { type: 'string' },
-            org_name: { type: 'string' }
-          }, 
-          required: ['id', 'record_type'] 
-        } 
-      },
-      daily_records: { 
-        schema: { 
-          version: 0, 
-          primaryKey: 'id', 
-          type: 'object', 
-          properties: { 
-            ...baseProperties, 
-            animal_id: { type: 'string' }, 
-            value: { type: 'string' }, 
-            date: { type: 'string' },
-            log_date: { type: 'string' },
-            log_type: { type: 'string' },
-            shift: { type: 'string' },
-            section: { type: 'string' },
-            status: { type: 'string' }
-          }, 
-          required: ['id', 'record_type'] 
-        } 
-      },
-      clinical_records: { 
-        schema: { 
-          version: 0, 
-          primaryKey: 'id', 
-          type: 'object', 
-          properties: { 
-            ...baseProperties, 
-            animal_id: { type: 'string' }, 
-            note_text: { type: 'string' },
-            date: { type: 'string' },
-            note_type: { type: 'string' },
-            medication: { type: 'string' },
-            status: { type: 'string' }
-          }, 
-          required: ['id', 'record_type'] 
-        } 
-      },
-      logistics_records: { 
-        schema: { 
-          version: 0, 
-          primaryKey: 'id', 
-          type: 'object', 
-          properties: { 
-            ...baseProperties, 
-            animal_id: { type: 'string' }, 
-            destination: { type: 'string' },
-            log_date: { type: 'string' },
-            date: { type: 'string' },
-            movement_type: { type: 'string' },
-            transfer_type: { type: 'string' }
-          }, 
-          required: ['id', 'record_type'] 
-        } 
-      },
-      staff_records: { 
-        schema: { 
-          version: 0, 
-          primaryKey: 'id', 
-          type: 'object', 
-          properties: { 
-            ...baseProperties, 
-            user_id: { type: 'string' }, 
-            staff_name: { type: 'string' }, 
-            date: { type: 'string' },
-            start_date: { type: 'string' },
-            end_date: { type: 'string' },
-            status: { type: 'string' },
-            shift_type: { type: 'string' }
-          }, 
-          required: ['id', 'record_type'] 
-        } 
-      },
-      safety_records: { 
-        schema: { 
-          version: 0, 
-          primaryKey: 'id', 
-          type: 'object', 
-          properties: { 
-            ...baseProperties, 
-            description: { type: 'string' }, 
-            severity: { type: 'string' },
-            date: { type: 'string' },
-            type: { type: 'string' },
-            status: { type: 'string' }
-          }, 
-          required: ['id', 'record_type'] 
-        } 
-      },
-      tasks: { 
-        schema: { 
-          version: 0, 
-          primaryKey: 'id', 
-          type: 'object', 
-          properties: { 
-            ...baseProperties, 
-            title: { type: 'string' }, 
-            due_date: { type: 'string' },
-            completed: { type: 'boolean' },
-            animal_id: { type: 'string' }
-          }, 
-          required: ['id', 'record_type'] 
-        } 
-      }
-    });
-
-    return db;
+      await db.addCollections({
+        animals: { 
+          schema: { 
+            version: 0, 
+            primaryKey: 'id', 
+            type: 'object', 
+            properties: { 
+              ...baseProperties, 
+              name: { type: 'string' }, 
+              species: { type: 'string' },
+              category: { type: 'string' },
+              location: { type: 'string' }
+            }, 
+            required: ['id', 'record_type'] 
+          } 
+        },
+        admin_records: { 
+          schema: { 
+            version: 0, 
+            primaryKey: 'id', 
+            type: 'object', 
+            properties: { 
+              ...baseProperties, 
+              email: { type: 'string' },
+              name: { type: 'string' },
+              role: { type: 'string' },
+              initials: { type: 'string' },
+              permissions: { type: 'object' },
+              type: { type: 'string' },
+              value: { type: 'string' }
+            }, 
+            required: ['id', 'record_type'] 
+          } 
+        },
+        daily_records: { 
+          schema: { 
+            version: 0, 
+            primaryKey: 'id', 
+            type: 'object', 
+            properties: { 
+              ...baseProperties, 
+              animal_id: { type: 'string' }, 
+              type: { type: 'string' },
+              value: { type: 'string' }, 
+              date: { type: 'string' },
+              shift: { type: 'string' },
+              section: { type: 'string' }
+            }, 
+            required: ['id', 'record_type'] 
+          } 
+        },
+        clinical_records: { 
+          schema: { 
+            version: 0, 
+            primaryKey: 'id', 
+            type: 'object', 
+            properties: { 
+              ...baseProperties, 
+              animal_id: { type: 'string' }, 
+              note_text: { type: 'string' },
+              date: { type: 'string' },
+              medication: { type: 'string' }
+            }, 
+            required: ['id', 'record_type'] 
+          } 
+        },
+        logistics_records: { 
+          schema: { 
+            version: 0, 
+            primaryKey: 'id', 
+            type: 'object', 
+            properties: { 
+              ...baseProperties, 
+              animal_id: { type: 'string' }, 
+              destination: { type: 'string' },
+              log_date: { type: 'string' },
+              date: { type: 'string' },
+              movement_type: { type: 'string' },
+              transfer_type: { type: 'string' }
+            }, 
+            required: ['id', 'record_type'] 
+          } 
+        },
+        staff_records: { 
+          schema: { 
+            version: 0, 
+            primaryKey: 'id', 
+            type: 'object', 
+            properties: { 
+              ...baseProperties, 
+              user_id: { type: 'string' }, 
+              staff_name: { type: 'string' }, 
+              date: { type: 'string' },
+              clock_in: { type: 'string' },
+              clock_out: { type: 'string' },
+              status: { type: 'string' }
+            }, 
+            required: ['id', 'record_type'] 
+          } 
+        },
+        safety_records: { 
+          schema: { 
+            version: 0, 
+            primaryKey: 'id', 
+            type: 'object', 
+            properties: { 
+              ...baseProperties, 
+              description: { type: 'string' }, 
+              severity: { type: 'string' },
+              date: { type: 'string' },
+              type: { type: 'string' },
+              status: { type: 'string' }
+            }, 
+            required: ['id', 'record_type'] 
+          } 
+        },
+        tasks: { 
+          schema: { 
+            version: 0, 
+            primaryKey: 'id', 
+            type: 'object', 
+            properties: { 
+              ...baseProperties, 
+              animal_id: { type: 'string' },
+              title: { type: 'string' }, 
+              due_date: { type: 'string' },
+              completed: { type: 'boolean' },
+              assigned_to: { type: 'string' }
+            }, 
+            required: ['id', 'record_type'] 
+          } 
+        }
+      });
+      console.log('💾 [RxDB] Collections added.');
+      return db;
+    } catch (error) {
+      console.error('💾 [RxDB] Initialization failed:', error);
+      throw error;
+    }
   })();
   return dbPromise;
 };

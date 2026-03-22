@@ -10,7 +10,7 @@ export function usePermissions() {
 
   useEffect(() => {
     async function fetchPermissions() {
-      if (!currentUser?.role) {
+      if (!currentUser?.role || !db) {
         setRolePermissions(null);
         return;
       }
@@ -25,8 +25,9 @@ export function usePermissions() {
       } else {
         // Fallback to Supabase
         const { data, error } = await supabase
-          .from('role_permissions')
+          .from('admin_records')
           .select('*')
+          .eq('record_type', 'role_permissions')
           .eq('role', currentUser.role)
           .single();
 

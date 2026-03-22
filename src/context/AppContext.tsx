@@ -3,7 +3,6 @@ import { AnimalCategory, UserRole } from '../types';
 import { AppContext, AppContextType } from './Context';
 import { useTimesheetData } from '../features/staff/useTimesheetData';
 import { useAuthStore } from '../store/authStore';
-import { initDatabase } from '../lib/rxdb';
 import { RxDatabase } from 'rxdb';
 
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
@@ -12,7 +11,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [db, setDb] = useState<RxDatabase | null>(null);
 
   useEffect(() => {
-    initDatabase().then(setDb);
+    // Just get the db instance
+    import('../lib/rxdb').then(({ db }) => {
+      if (db) setDb(db);
+    });
   }, []);
 
   const activeShift = timesheets.find(t => t.staff_name === currentUser?.name && !t.clock_out);

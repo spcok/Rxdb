@@ -34,13 +34,24 @@ import { isSupabaseConfigured } from './lib/supabase';
 export default function App() {
   const { initialize, isLoading, session } = useAuthStore();
   const [db, setDb] = useState<RxDatabase | null>(null);
+  const [initError, setInitError] = useState<string | null>(null);
   const [supabaseError] = useState<string | null>(() => 
     isSupabaseConfigured() ? null : 'Supabase environment variables (VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY) are missing. Some features may not work.'
   );
   useInactivityTimer();
 
+  const handleEmergencyReset = () => {
+    window.indexedDB.deleteDatabase('animaldb_v12');
+    window.location.reload();
+  };
+
   useEffect(() => {
-    initDatabase().then(setDb);
+    initDatabase()
+      .then(setDb)
+      .catch(err => {
+        console.error('💾 [RxDB] CRITICAL INITIALIZATION FAILURE:', err);
+        setInitError(err.message || 'Unknown database error');
+      });
   }, []);
 
   useEffect(() => {
@@ -64,12 +75,29 @@ export default function App() {
     };
   }, [initialize]);
 
-  if (isLoading || !db) {
+  if (isLoading || (!db && !initError)) {
     return (
       <div className="h-screen w-screen flex items-center justify-center bg-slate-950">
         <div className="flex flex-col items-center gap-4">
           <div className="w-12 h-12 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
           <p className="text-emerald-500 font-black uppercase tracking-widest text-[10px]">Initializing...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (initError) {
+    return (
+      <div className="h-screen w-screen flex items-center justify-center bg-rose-950 text-white p-4">
+        <div className="bg-black/50 p-8 rounded-3xl max-w-md w-full text-center">
+          <h1 className="text-2xl font-black uppercase tracking-tight text-rose-500 mb-4">Database Error</h1>
+          <p className="text-slate-400 mb-8 font-mono text-xs">{initError}</p>
+          <button
+            onClick={handleEmergencyReset}
+            className="w-full py-4 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-black uppercase tracking-widest text-sm transition-colors"
+          >
+            Emergency Reset (Delete DB)
+          </button>
         </div>
       </div>
     );
