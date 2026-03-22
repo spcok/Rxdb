@@ -26,16 +26,22 @@ export const useAuthStore = create<AuthState>((set) => ({
   login: async (email, password) => {
     if (!isSupabaseConfigured()) {
       return { 
-        error: { 
-          message: 'Supabase URL/Key missing in environment.',
-          name: 'AuthError',
-          status: 500,
-          __isAuthError: true,
-          code: 'MISSING_ENV'
-        } as unknown as AuthError 
+        error: { message: 'Supabase URL/Key missing.' } as AuthError 
       };
     }
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    
+    // 1. Authenticate with Supabase
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    
+    // 2. CRITICAL FIX: If login is successful, update the app state to trigger the redirect
+    if (data?.session) {
+      set({ 
+        session: data.session, 
+        user: data.session.user, 
+        currentUser: data.session.user as unknown as User 
+      });
+    }
+    
     return { error };
   },
 
@@ -50,7 +56,10 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   initialize: async () => {
     set({ isLoading: true });
+    
+    // 1. Check for an existing session on load
     const { data: { session } } = await supabase.auth.getSession();
+    
     if (session) {
       set({ session, user: session.user, currentUser: session.user as unknown as User, isLoading: false });
     } else {
@@ -75,5 +84,14 @@ export const useAuthStore = create<AuthState>((set) => ({
         set({ isLoading: false });
       }
     }
+
+    // 2. CRITICAL FIX: Listen for background auth changes (like token expiration)
+    supabase.auth.onAuthStateChange((_event, newSession) => {
+      if (newSession) {
+        set({ session: newSession, user: newSession.user, currentUser: newSession.user as unknown as User });
+      } else {
+        set({ session: null, user: null, currentUser: null });
+      }
+    });
   }
 }));

@@ -2,7 +2,7 @@ import React from 'react';
 import { Animal, LogType, LogEntry, ClinicalNote } from '../../types';
 import HusbandryEntryModal from '../husbandry/AddEntryModal';
 import { AddClinicalNoteModal } from '../medical/AddClinicalNoteModal';
-import { mutateOnlineFirst } from '../../lib/dataEngine';
+import { db } from '../../lib/rxdb';
 
 interface AddEntryModalProps {
   isOpen: boolean;
@@ -25,7 +25,11 @@ const AddEntryModal: React.FC<AddEntryModalProps> = ({
 
   const handleHusbandrySave = async (entry: Partial<LogEntry>) => {
     try {
-      await mutateOnlineFirst('daily_logs', entry, 'upsert');
+      await db.daily_records.upsert({
+        ...entry,
+        record_type: 'daily_logs_v2',
+        is_deleted: false
+      });
     } catch (err) {
       console.error("🛠️ [Animals QA] Failed to save husbandry log:", err);
     }
@@ -36,9 +40,11 @@ const AddEntryModal: React.FC<AddEntryModalProps> = ({
       // Ensure animal_name is present for medical logs if required by the type
       const noteWithMetadata = {
         ...note,
-        animal_name: animal.name
+        animal_name: animal.name,
+        record_type: 'clinical_note',
+        is_deleted: false
       };
-      await mutateOnlineFirst('medical_logs', noteWithMetadata, 'upsert');
+      await db.clinical_records.upsert(noteWithMetadata);
     } catch (err) {
       console.error("🛠️ [Animals QA] Failed to save medical log:", err);
     }

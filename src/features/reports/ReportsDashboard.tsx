@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { 
   CalendarDays, 
   ListOrdered, 
@@ -15,7 +15,6 @@ import {
 } from 'lucide-react';
 import { renderAsync } from 'docx-preview';
 import { db } from '../../lib/rxdb';
-import { useHybridQuery } from '../../lib/dataEngine';
 import { Animal, UserRole, Shift, ClinicalNote, MARChart, InternalMovement, ExternalTransfer, MaintenanceLog } from '../../types';
 import { generateDailyLogDocx, generateInternalMovementsDocx, generateExternalTransfersDocx, generateSiteMaintenanceDocx, generateAnimalCensusDocx, generateSection9Docx, generateDeathCertificateDocx, generateStaffRotaDocx, generateInspectionPackage } from './utils/docxExportService';
 import { useAuthStore } from '../../store/authStore';
@@ -139,9 +138,40 @@ export default function ReportsDashboard() {
   const [selectedSection, setSelectedSection] = useState<string>('');
   const [orientation, setOrientation] = useState<'portrait' | 'landscape'>('landscape');
   const [rotaPeriod, setRotaPeriod] = useState<'daily' | 'weekly' | 'monthly'>('weekly');
+  const [animals, setAnimals] = useState<Animal[]>([]);
+  const [archivedAnimals, setArchivedAnimals] = useState<Animal[]>([]);
+  const [rawShifts, setRawShifts] = useState<Shift[]>([]);
+
+  useEffect(() => {
+    if (!db) return;
+
+    const animalsSub = db.animals.find({
+      selector: { record_type: 'animals', is_deleted: { $eq: false } }
+    }).$.subscribe(docs => {
+      setAnimals(docs.map(d => d.toJSON() as Animal));
+    });
+
+    const archivedSub = db.animals.find({
+      selector: { record_type: 'archived_animals', is_deleted: { $eq: false } }
+    }).$.subscribe(docs => {
+      setArchivedAnimals(docs.map(d => d.toJSON() as Animal));
+    });
+
+    const shiftsSub = db.staff_records.find({
+      selector: { record_type: 'shifts', is_deleted: { $eq: false } }
+    }).$.subscribe(docs => {
+      setRawShifts(docs.map(d => d.toJSON() as Shift));
+    });
+
+    return () => {
+      animalsSub.unsubscribe();
+      archivedSub.unsubscribe();
+      shiftsSub.unsubscribe();
+    };
+  }, []);
 
   // Auto-calculate End Date based on the selected Rota Period
-  React.useEffect(() => {
+  useEffect(() => {
     if (activeReportId === 'staff_rota') {
       const start = new Date(startDate);
       const end = new Date(startDate);
@@ -159,23 +189,6 @@ export default function ReportsDashboard() {
     }
   }, [startDate, rotaPeriod, activeReportId]);
   
-  const animals = useHybridQuery<Animal[]>('animals', async () => {
-    const docs = await db.animals.find({ selector: { is_deleted: { $eq: false } } }).exec();
-    return docs.map(d => d.toJSON() as Animal);
-  }, []);
-  const archivedAnimals = useHybridQuery<Animal[]>('archived_animals', async () => {
-    // Note: archived_animals might still be in Dexie or needs to be added to RxDB
-    // For now, we'll try to find them in RxDB if they were merged, or keep them as is if they are separate.
-    // If they are not in RxDB, this will fail. Let's assume they are in RxDB for consistency if we are moving to RxDB.
-    // Actually, looking at rxdb.ts, archived_animals is NOT there. 
-    // I'll keep it as a placeholder or try to find archived animals in the 'animals' collection.
-    const docs = await db.animals.find({ selector: { archived: { $eq: true }, is_deleted: { $eq: false } } }).exec();
-    return docs.map(d => d.toJSON() as Animal);
-  }, []);
-  const rawShifts = useHybridQuery<Shift[]>('shifts', async () => {
-    const docs = await db.staff_records.find({ selector: { record_type: 'shifts', is_deleted: { $eq: false } } }).exec();
-    return docs.map(d => d.toJSON() as Shift);
-  }, []);
   const { currentUser } = useAuthStore();
 
   const uniqueSections = activeReportId === 'staff_rota'

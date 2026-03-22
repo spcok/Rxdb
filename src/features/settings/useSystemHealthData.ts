@@ -1,8 +1,6 @@
 import { useState, useEffect } from 'react';
-import { db as dexieDb } from '../../lib/db';
 import { db as rxdb } from '../../lib/rxdb';
 import { supabase } from '../../lib/supabase';
-import { forceHydrateFromCloud } from '../../lib/syncEngine';
 
 export function useSystemHealthData() {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
@@ -132,7 +130,7 @@ export function useSystemHealthData() {
       try {
         const counts = {
           animals: await rxdb.animals.find().exec().then(docs => docs.length),
-          users: await dexieDb.users.count(), // Users might still be in Dexie
+          users: await rxdb.admin_records.find({ selector: { record_type: 'user' } }).exec().then(docs => docs.length),
           daily_logs: await rxdb.daily_records.find({ selector: { record_type: 'daily_logs_v2' } }).exec().then(docs => docs.length),
           tasks: await rxdb.tasks.find().exec().then(docs => docs.length),
           medical_logs: await rxdb.clinical_records.find({ selector: { record_type: 'medical_logs' } }).exec().then(docs => docs.length)
@@ -151,7 +149,8 @@ export function useSystemHealthData() {
   const executeForceRebuild = async () => {
     setIsHydrating(true);
     try {
-      await forceHydrateFromCloud();
+      // With RxDB, we don't need manual hydration, it syncs automatically.
+      // We could trigger a manual replication restart here if needed.
       return true;
     } catch (error) {
       console.error("Hydration failed:", error);
@@ -164,7 +163,7 @@ export function useSystemHealthData() {
   const executeClearQueue = async () => {
     setIsClearingQueue(true);
     try {
-      await dexieDb.sync_queue.clear();
+      // No sync_queue table in RxDB
       return true;
     } catch (error) {
       console.error("Failed to clear queue:", error);
@@ -193,11 +192,9 @@ export function useSystemHealthData() {
         // Wipe Cloud Database
         await supabase.from(table).delete().not('id', 'is', null);
         
-        // Wipe Local IndexedDB Cache
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const dbTable = dexieDb[table as keyof typeof dexieDb] as any;
-        if (dbTable && dbTable.clear) {
-          await dbTable.clear();
+        // Wipe Local RxDB Cache
+        if (rxdb && rxdb.collections[table]) {
+          await rxdb.collections[table].find().remove();
         }
 
         setWipeProgress(Math.round(((i + 1) / tablesToWipe.length) * 100));

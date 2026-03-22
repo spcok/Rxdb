@@ -1,24 +1,45 @@
-import { useMemo } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useAuthStore } from '../store/authStore';
 import { UserRole, RolePermissionConfig } from '../types';
-import { useHybridQuery } from '../lib/dataEngine';
-import { db } from '../lib/db';
+import { db } from '../lib/rxdb';
 import { supabase } from '../lib/supabase';
 
 export function usePermissions() {
   const { currentUser } = useAuthStore();
+  const [rolePermissions, setRolePermissions] = useState<RolePermissionConfig | null>(null);
 
-  const rolePermissions = useHybridQuery<RolePermissionConfig | null>(
-    'role_permissions',
-    currentUser?.role 
-      ? supabase.from('role_permissions').select('*').eq('role', currentUser.role).single()
-      : Promise.resolve({ data: null, error: null }),
-    async () => {
-      if (!currentUser?.role) return null;
-      return (await db.role_permissions.get(currentUser.role)) || null;
-    },
-    [currentUser?.role]
-  );
+  useEffect(() => {
+    async function fetchPermissions() {
+      if (!currentUser?.role) {
+        setRolePermissions(null);
+        return;
+      }
+
+      // Try local RxDB first
+      const localPermissions = await db.admin_records.findOne({
+        selector: { record_type: 'role_permissions', role: currentUser.role }
+      }).exec();
+
+      if (localPermissions) {
+        setRolePermissions(localPermissions.toJSON() as RolePermissionConfig);
+      } else {
+        // Fallback to Supabase
+        const { data, error } = await supabase
+          .from('role_permissions')
+          .select('*')
+          .eq('role', currentUser.role)
+          .single();
+
+        if (data && !error) {
+          setRolePermissions(data as RolePermissionConfig);
+        } else {
+          setRolePermissions(null);
+        }
+      }
+    }
+
+    fetchPermissions();
+  }, [currentUser?.role]);
 
   const permissions = useMemo(() => {
     const role = currentUser?.role || UserRole.VOLUNTEER;

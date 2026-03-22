@@ -1,8 +1,6 @@
-import { db } from '../lib/db';
+import { useState, useEffect } from 'react';
+import { db } from '../lib/rxdb';
 import { UserRole, RolePermissionConfig } from '../types';
-import { mutateOnlineFirst, useHybridQuery } from '../lib/dataEngine';
-import { supabase } from '../lib/supabase';
-import { useEffect } from 'react';
 
 const defaultPermissions: Omit<RolePermissionConfig, 'role'> = {
   view_animals: false,
@@ -47,24 +45,44 @@ const defaultPermissions: Omit<RolePermissionConfig, 'role'> = {
 };
 
 export const useRoleSettings = () => {
-  const roles = useHybridQuery<RolePermissionConfig[]>(
-    'role_permissions',
-    supabase.from('role_permissions').select('*'),
-    () => db.role_permissions.toArray(),
-    []
-  );
+  const [roles, setRoles] = useState<RolePermissionConfig[]>([]);
 
   useEffect(() => {
-    if (roles) {
+    if (!db) return;
+
+    const sub = db.admin_records.find({
+      selector: {
+        record_type: 'role_permission',
+        is_deleted: { $eq: false }
+      }
+    }).$.subscribe(docs => {
+      setRoles(docs.map(d => d.toJSON() as RolePermissionConfig));
+    });
+
+    return () => sub.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (roles.length > 0 && db) {
       const existingRoles = roles.map(r => r.role);
       const missingRoles = Object.values(UserRole).filter(role => !existingRoles.includes(role));
 
-      missingRoles.forEach(role => {
+      missingRoles.forEach(async role => {
         const newRoleConfig: RolePermissionConfig = {
           role,
           ...defaultPermissions,
         };
-        mutateOnlineFirst('role_permissions', newRoleConfig as unknown as Record<string, unknown>);
+        try {
+          await db.admin_records.upsert({
+            ...newRoleConfig,
+            id: `role_${role}`,
+            record_type: 'role_permission',
+            is_deleted: false,
+            updated_at: new Date().toISOString()
+          });
+        } catch (err) {
+          console.error('Failed to create missing role:', err);
+        }
       });
     }
   }, [roles]);
@@ -79,7 +97,12 @@ export const useRoleSettings = () => {
     };
 
     try {
-      await mutateOnlineFirst('role_permissions', updatedConfig as unknown as Record<string, unknown>);
+      await db.admin_records.upsert({
+        ...updatedConfig,
+        id: `role_${role}`,
+        record_type: 'role_permission',
+        updated_at: new Date().toISOString()
+      });
     } catch (error) {
       console.error('Failed to update permission:', error);
       alert('Failed to update permission. Please try again.');

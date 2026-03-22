@@ -1,8 +1,6 @@
 import { useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { db, AppDatabase } from '../lib/db';
-import { Table } from 'dexie';
-import { syncDataToSupabase } from '../services/syncService';
+import { db } from '../lib/rxdb';
 import { 
   Animal, 
   AnimalCategory, 
@@ -195,9 +193,9 @@ export const useMigrationData = () => {
 
       const allData: { table: string, data: (Animal | LogEntry | InternalMovement | ClinicalNote)[], chunkSize: number }[] = [
         { table: 'animals', data: animalsToImport, chunkSize: 50 },
-        { table: 'daily_logs', data: logsToImport, chunkSize: 250 },
-        { table: 'internal_movements', data: movementsToImport, chunkSize: 250 },
-        { table: 'medical_logs', data: medicalToImport, chunkSize: 250 }
+        { table: 'daily_records', data: logsToImport.map(d => ({ ...d, record_type: 'daily_logs_v2' })), chunkSize: 250 },
+        { table: 'logistics_records', data: movementsToImport.map(d => ({ ...d, record_type: 'internal_movements' })), chunkSize: 250 },
+        { table: 'clinical_records', data: medicalToImport.map(d => ({ ...d, record_type: 'medical_logs' })), chunkSize: 250 }
       ];
       
       let totalItems = 0;
@@ -208,13 +206,12 @@ export const useMigrationData = () => {
         const chunks = chunkArray(item.data, item.chunkSize);
         for (const chunk of chunks) {
           try {
-            // Dexie first
-            await (db[item.table as keyof AppDatabase] as Table<Record<string, unknown>, string>).bulkPut(chunk as unknown as Record<string, unknown>[]);
-            // Supabase second
-            await syncDataToSupabase(item.table, chunk as unknown as Record<string, unknown>[]);
+            if (db && db.collections[item.table]) {
+              await db.collections[item.table].bulkInsert(chunk);
+            }
           } catch (err) {
             console.error(`[MIGRATION] Error importing chunk into ${item.table}:`, err);
-            setError(`Some items failed to sync to Supabase for ${item.table}.`);
+            setError(`Some items failed to sync to RxDB for ${item.table}.`);
           }
           processedItems += chunk.length;
           setProgress((processedItems / totalItems) * 100);
@@ -251,9 +248,6 @@ function chunkArray<T>(array: T[], size: number): T[][] {
     array.slice(i * size, i * size + size)
   );
 }
-// ... (keep existing mappers)
-
-// --- Helper Mappers ---
 
 function mapCategory(cat: string): AnimalCategory {
   const upper = (cat || '').toUpperCase();

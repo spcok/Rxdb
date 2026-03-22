@@ -4,7 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { X, Save, Loader2, Plus, Trash2 } from 'lucide-react';
 import { Animal, LogType, LogEntry, AnimalCategory } from '../../types';
 import { getMaidstoneDailyWeather } from '../../services/weatherService';
-import { mutateOnlineFirst } from '../../lib/dataEngine';
+import { db } from '../../lib/rxdb';
 import { useOperationalLists } from '../../hooks/useOperationalLists';
 import { convertToGrams, convertFromGrams } from '../../services/weightUtils';
 
@@ -230,7 +230,7 @@ const AddEntryModal: React.FC<AddEntryModalProps> = ({
           } as Animal));
           
           for (const pup of pups) {
-            await mutateOnlineFirst('animals', pup, 'upsert');
+            await db.animals.upsert(pup);
           }
         }
       }

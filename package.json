@@ -19,7 +19,6 @@
     "ajv-formats": "^3.0.1",
     "browser-image-compression": "^2.0.2",
     "dexie": "4.3.0",
-    "dexie-react-hooks": "^4.2.0",
     "docx": "^9.6.1",
     "docx-preview": "^0.3.7",
     "dotenv": "^17.3.1",

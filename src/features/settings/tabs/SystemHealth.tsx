@@ -1,32 +1,17 @@
 import React, { useEffect, useState } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { v4 as uuidv4 } from 'uuid';
-import { db } from '../../../lib/db';
-import { supabase } from '../../../lib/supabase';
-import { processSyncQueue, reconcileMissedEvents } from '../../../lib/syncEngine';
 import { PwaDiagnostics } from '../../../components/ui/PwaDiagnostics';
 import { 
-  Activity, HardDrive, Database, AlertTriangle, 
-  CheckCircle2, RefreshCw, Info, ShieldAlert,
-  Download, Trash2, ShieldX, Terminal
+  Activity, HardDrive, AlertTriangle, 
+  CheckCircle2, Info,
+  Download, Trash2, ShieldX
 } from 'lucide-react';
+import { db } from '../../../lib/rxdb';
+import { removeRxDatabase } from 'rxdb';
+import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie';
 
 const SystemHealth: React.FC = () => {
   const [storageEstimate, setStorageEstimate] = useState<{ used: number; total: number; percentage: number } | null>(null);
-  const [isSyncing, setIsSyncing] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
-  const [pingLog, setPingLog] = useState<string[]>([]);
-  const [isPinging, setIsPinging] = useState(false);
-
-  // Real-time Sync Queue Metrics
-  const syncMetrics = useLiveQuery(async () => {
-    const all = await db.sync_queue.toArray();
-    return {
-      total: all.length,
-      pending: all.filter(i => i.status === 'pending').length,
-      quarantined: all.filter(i => i.status === 'quarantined').length,
-    };
-  }, []);
 
   // Storage API Estimation
   useEffect(() => {
@@ -40,99 +25,16 @@ const SystemHealth: React.FC = () => {
     }
   }, []);
 
-  const handleClearQuarantine = async () => {
-    if (window.confirm('Are you sure you want to permanently delete all quarantined sync items?')) {
-      const quarantined = await db.sync_queue.where('status').equals('quarantined').toArray();
-      const ids = quarantined.map(q => q.id as number);
-      await db.sync_queue.bulkDelete(ids);
-    }
-  };
-
-  const handleForceSync = async () => {
-    setIsSyncing(true);
-    try {
-      await reconcileMissedEvents(); // 1. Pull latest server data
-      await processSyncQueue();      // 2. Push local offline queue
-    } finally {
-      setIsSyncing(false);
-    }
-  };
-
-  const runPipelinePing = async () => {
-    setIsPinging(true);
-    setPingLog(['🚀 Starting 3-Way Pipeline Ping...']);
-    const testId = uuidv4();
-
-    try {
-      setPingLog(p => [...p, '⏳ Fetching valid Animal ID for foreign key constraint...']);
-      const firstAnimal = await db.animals.toCollection().first();
-
-      if (!firstAnimal) {
-        setPingLog(p => [...p, '❌ FATAL: No animals found in local database. Cannot perform constraint test.']);
-        setIsPinging(false);
-        return;
-      }
-
-      const targetAnimalId = firstAnimal.id;
-      setPingLog(p => [...p, `✅ Using Animal ID: ${targetAnimalId}`]);
-
-      // Step 1: Write to Dexie (Local DB)
-      setPingLog(p => [...p, '⏳ 1. Writing test payload to Dexie...']);
-      await db.sync_queue.add({
-        table_name: 'daily_logs',
-        record_id: testId,
-        operation: 'upsert',
-        payload: { 
-          id: testId, 
-          animal_id: targetAnimalId, // Real ID satisfies the Foreign Key constraint
-          log_type: 'GENERAL', // Satisfies the NOT NULL constraint
-          value: 'SYSTEM_PING_TEST', // Added to satisfy NOT NULL constraint
-          log_date: new Date().toISOString(), 
-          notes: 'PIPELINE_PING_TEST', 
-          created_at: new Date().toISOString() 
-        },
-        status: 'pending',
-        priority: 1,
-        created_at: new Date().toISOString(),
-        retry_count: 0
-      });
-      setPingLog(p => [...p, '✅ 1. Dexie write successful.']);
-
-      // Step 2: Trigger Sync Engine
-      setPingLog(p => [...p, '⏳ 2. Firing Sync Engine to push to Supabase...']);
-      await processSyncQueue();
-      setPingLog(p => [...p, '✅ 2. Sync Engine executed.']);
-
-      // Step 3: Verify in Supabase
-      setPingLog(p => [...p, '⏳ 3. Querying Supabase directly for test record...']);
-      const { data, error } = await supabase.from('daily_logs').select('id').eq('id', testId).single();
-
-      if (error || !data) {
-        setPingLog(p => [...p, '❌ 3. Supabase verification failed. Record did not arrive.']);
-      } else {
-        setPingLog(p => [...p, '✅ 3. Supabase received the record! Pipeline is HEALTHY.']);
-      }
-
-      // Step 4: Cleanup
-      setPingLog(p => [...p, '⏳ 4. Cleaning up test data...']);
-      await supabase.from('daily_logs').delete().eq('id', testId);
-      setPingLog(p => [...p, '✅ 4. Cleanup complete.']);
-
-    } catch (err) {
-      setPingLog(p => [...p, `❌ FATAL ERROR: ${err instanceof Error ? err.message : String(err)}`]);
-    } finally {
-      setIsPinging(false);
-    }
-  };
-
   const exportLocalDatabase = async () => {
     setIsExporting(true);
     try {
+      if (!db) return;
       const exportData: Record<string, unknown[]> = {};
-      const tables = db.tables;
       
-      for (const table of tables) {
-        exportData[table.name] = await table.toArray();
+      const collections = Object.keys(db.collections);
+      for (const colName of collections) {
+        const docs = await db.collections[colName].find().exec();
+        exportData[colName] = docs.map(d => d.toJSON());
       }
       
       const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
@@ -162,7 +64,9 @@ const SystemHealth: React.FC = () => {
       if (secondConfirm === 'PURGE') {
         try {
           console.warn('🚨 [Diagnostics] Initiating emergency local database purge...');
-          await db.delete();
+          if (db) {
+            await removeRxDatabase('animaldb_v11', getRxStorageDexie());
+          }
           localStorage.clear();
           window.location.reload();
         } catch (error) {
@@ -185,39 +89,7 @@ const SystemHealth: React.FC = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {/* Sync Queue Card */}
-        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider">Sync Engine</h3>
-            <Database className="w-5 h-5 text-indigo-500" />
-          </div>
-          <div className="space-y-3">
-            <div className="flex justify-between items-center">
-              <span className="text-sm text-slate-600">Total Queue</span>
-              <span className="font-mono font-bold text-slate-900">{syncMetrics?.total || 0}</span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-sm text-slate-600">Pending</span>
-              <span className="font-mono font-bold text-emerald-600">{syncMetrics?.pending || 0}</span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-sm text-slate-600">Quarantined</span>
-              <span className={`font-mono font-bold ${syncMetrics?.quarantined ? 'text-rose-600' : 'text-slate-400'}`}>
-                {syncMetrics?.quarantined || 0}
-              </span>
-            </div>
-          </div>
-          <button 
-            onClick={handleForceSync}
-            disabled={isSyncing}
-            className="w-full mt-4 flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm font-bold rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-          >
-            <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
-            {isSyncing ? 'Syncing...' : 'Force Sync Now'}
-          </button>
-        </div>
-
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Storage Card */}
         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
           <div className="flex items-center justify-between mb-4">
@@ -272,11 +144,7 @@ const SystemHealth: React.FC = () => {
           <div className="space-y-4">
             <div className="flex items-center gap-3">
               <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              <span className="text-sm font-medium text-slate-700">Offline Engine Active</span>
-            </div>
-            <div className="flex items-center gap-3">
-              <div className="w-2 h-2 rounded-full bg-emerald-500" />
-              <span className="text-sm font-medium text-slate-700">Dexie v30 Initialized</span>
+              <span className="text-sm font-medium text-slate-700">RxDB Engine Active</span>
             </div>
             <div className="flex items-center gap-3">
               <div className="w-2 h-2 rounded-full bg-emerald-500" />
@@ -290,62 +158,10 @@ const SystemHealth: React.FC = () => {
         </div>
       </div>
 
-      {/* Quarantined Items Warning */}
-      {syncMetrics?.quarantined ? (
-        <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-4">
-          <div className="p-2 bg-rose-100 rounded-lg">
-            <ShieldAlert className="w-6 h-6 text-rose-600" />
-          </div>
-          <div>
-            <h4 className="text-sm font-bold text-rose-900">Quarantined Sync Items Detected</h4>
-            <p className="text-xs text-rose-700 mt-1 leading-relaxed">
-              {syncMetrics.quarantined} items have failed multiple sync attempts and are quarantined to prevent queue blockage. 
-              These usually indicate schema conflicts or validation errors. Please contact technical support for manual reconciliation.
-            </p>
-            <button 
-              onClick={handleClearQuarantine}
-              className="mt-3 px-3 py-1.5 bg-rose-200 text-rose-800 text-xs font-bold rounded-lg hover:bg-rose-300 transition-colors"
-            >
-              Clear Quarantine Queue
-            </button>
-          </div>
-        </div>
-      ) : null}
-
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="space-y-6">
           {/* PWA Diagnostics */}
           <PwaDiagnostics />
-
-          {/* Pipeline Diagnostic Tool */}
-          <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider">Pipeline Diagnostics</h3>
-              <Terminal className="w-5 h-5 text-indigo-500" />
-            </div>
-            <div className="space-y-4">
-              <div className="p-3 bg-slate-50 rounded-lg border border-slate-200">
-                <h4 className="text-xs font-bold text-slate-700 mb-1">3-Way Pipeline Ping</h4>
-                <p className="text-[11px] text-slate-500 mb-3">Verifies end-to-end connectivity between React, Dexie, and Supabase by sending a test record.</p>
-                <button 
-                  onClick={runPipelinePing}
-                  disabled={isPinging}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 text-white text-xs font-bold rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-                >
-                  <RefreshCw size={14} className={isPinging ? 'animate-spin' : ''} />
-                  {isPinging ? 'Running Diagnostic...' : 'Run Pipeline Ping'}
-                </button>
-              </div>
-
-              {pingLog.length > 0 && (
-                <div className="bg-slate-950 p-4 rounded-lg font-mono text-[10px] text-emerald-400 overflow-y-auto max-h-48 space-y-1">
-                  {pingLog.map((log, index) => (
-                    <div key={index}>{log}</div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
         </div>
 
         {/* Advanced Actions / Danger Zone */}

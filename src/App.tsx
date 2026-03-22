@@ -27,7 +27,8 @@ import SafetyDrills from './features/safety/tabs/SafetyDrills';
 import SiteMaintenance from './features/safety/tabs/SiteMaintenance';
 import ReportsDashboard from './features/reports/ReportsDashboard';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { initDatabase, startReplication, stopReplication, RxDatabase } from './lib/rxdb';
+import { initDatabase, startReplication, stopReplication } from './lib/rxdb';
+import { RxDatabase } from 'rxdb';
 import { isSupabaseConfigured } from './lib/supabase';
 
 export default function App() {

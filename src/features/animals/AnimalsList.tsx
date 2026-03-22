@@ -1,17 +1,22 @@
-import { useState } from 'react';
-import { useHybridQuery } from '../../lib/dataEngine';
-import { db } from '../../lib/db';
+import { useState, useEffect } from 'react';
+import { db } from '../../lib/rxdb';
 import { Animal } from '../../types';
 import { usePermissions } from '../../hooks/usePermissions';
 
 export const AnimalsList = ({ animals, onSelectAnimal }: { animals: Animal[], onSelectAnimal: (animal: Animal) => void }) => {
   const [activeTab, setActiveTab] = useState<'live' | 'archived'>('live');
+  const [archivedAnimals, setArchivedAnimals] = useState<Animal[]>([]);
   const permissions = usePermissions();
-  const archivedAnimals = useHybridQuery<Animal[]>(
-    'archived_animals',
-    () => db.archived_animals.toArray(),
-    []
-  ) || [];
+
+  useEffect(() => {
+    if (!db) return;
+    const sub = db.animals.find({
+      selector: { record_type: 'archived_animals' }
+    }).$.subscribe(docs => {
+      setArchivedAnimals(docs.map(d => d.toJSON() as Animal));
+    });
+    return () => sub.unsubscribe();
+  }, []);
 
   const canViewArchived = permissions.isAdmin || permissions.isOwner;
 

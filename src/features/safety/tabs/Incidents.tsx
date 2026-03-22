@@ -77,8 +77,6 @@ const Incidents: React.FC = () => {
           await addIncident(incidentData);
       } catch (error) {
           console.error("Failed to commit incident to ledger:", error);
-          // If it failed critically, we might want to inform the user, 
-          // but mutateOnlineFirst handles offline queuing automatically.
       }
   };
 

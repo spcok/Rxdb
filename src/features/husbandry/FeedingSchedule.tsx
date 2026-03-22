@@ -1,20 +1,26 @@
-import React, { useState, useMemo, useTransition } from 'react';
+import React, { useState, useMemo, useTransition, useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { Animal, AnimalCategory, Task, LogType } from '../../types';
+import { Animal, AnimalCategory, Task, LogType, OperationalList } from '../../types';
 import { CalendarClock, Plus, Calendar, Trash2, Filter, Utensils, RefreshCw, Loader2, History, ArrowRight, Copy } from 'lucide-react';
 import { useFeedingScheduleData } from './useFeedingScheduleData';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../../lib/db';
+import { db } from '../../lib/rxdb';
 
 const FeedingSchedule: React.FC = () => {
   const { animals, tasks, addTasks, deleteTask, isLoading } = useFeedingScheduleData();
 
-  const foodOptions = useLiveQuery(
-    () => db.operational_lists
-            .filter(item => item.type === 'food')
-            .toArray(),
-    []
-  );
+  const [foodOptions, setFoodOptions] = useState<OperationalList[]>([]);
+
+  useEffect(() => {
+    if (!db) return;
+
+    const sub = db.operational_lists.find({
+      selector: { type: 'food' }
+    }).$.subscribe(docs => {
+      setFoodOptions(docs.map(d => d.toJSON() as OperationalList));
+    });
+
+    return () => sub.unsubscribe();
+  }, []);
 
   const [selectedCategory, setSelectedCategory] = useState<AnimalCategory>(AnimalCategory.EXOTICS);
   const [selectedAnimalId, setSelectedAnimalId] = useState('');

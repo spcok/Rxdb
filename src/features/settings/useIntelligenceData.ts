@@ -1,15 +1,34 @@
-import { db } from '../../lib/db';
+import { useState, useEffect } from 'react';
+import { db } from '../../lib/rxdb';
 import { Animal, ConservationStatus } from '../../types';
 import { batchGetSpeciesData } from '../../services/geminiService';
-import { useHybridQuery, mutateOnlineFirst } from '../../lib/dataEngine';
 
 export function useIntelligenceData() {
-  const animalsData = useHybridQuery<Animal[]>('animals', () => db.animals.toArray(), []);
-  const isLoading = animalsData === undefined;
-  const animals = animalsData || [];
+  const [animals, setAnimals] = useState<Animal[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    if (!db) return;
+
+    const sub = db.animals.find({
+      selector: { is_deleted: { $eq: false } }
+    }).$.subscribe(docs => {
+      setAnimals(docs.map(d => d.toJSON() as Animal));
+      setIsLoading(false);
+    });
+
+    return () => sub.unsubscribe();
+  }, []);
 
   const updateAnimal = async (animal: Animal) => {
-    await mutateOnlineFirst('animals', animal, 'upsert');
+    try {
+      await db.animals.upsert({
+        ...animal,
+        updated_at: new Date().toISOString()
+      });
+    } catch (err) {
+      console.error('Failed to update animal:', err);
+    }
   };
 
   const runIUCNScan = async (onProgress: (progress: number) => void) => {

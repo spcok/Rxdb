@@ -1,7 +1,6 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Plus, AlertTriangle, Loader2, Edit2, Trash2 } from 'lucide-react';
-import { supabase } from '../../lib/supabase';
-import { db } from '../../lib/db';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Plus, Loader2, Edit2, Trash2 } from 'lucide-react';
+import { db } from '../../lib/rxdb';
 import AddEntryModal from './AddEntryModal';
 import { Animal, LogType, LogEntry } from '../../types';
 import { formatWeightDisplay, parseLegacyWeightToGrams } from '../../services/weightUtils';
@@ -11,21 +10,36 @@ interface Props {
   animal: Animal; // Strictly required
 }
 
-
 const validHusbandryTypes = ['FEED', 'WEIGHT', 'FLIGHT', 'TRAINING', 'TEMPERATURE'];
 
 export const HusbandryLogs: React.FC<Props> = ({ animalId, animal }) => {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(true);
-  const [isOffline, setIsOffline] = useState(false);
   const [filter, setFilter] = useState('ALL');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [selectedLog, setSelectedLog] = useState<LogEntry | null>(null);
   const [displayLimit, setDisplayLimit] = useState(30);
 
+  useEffect(() => {
+    if (!db) return;
+
+    const sub = db.daily_records.find({
+      selector: {
+        animal_id: animalId,
+        log_type: { $in: validHusbandryTypes },
+        is_deleted: { $eq: false }
+      },
+      sort: [{ log_date: 'desc' }]
+    }).$.subscribe(docs => {
+      setLogs(docs.map(d => d.toJSON() as LogEntry));
+      setLoading(false);
+    });
+
+    return () => sub.unsubscribe();
+  }, [animalId]);
+
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
-    // Trigger silent update when within 20px of the bottom
     if (scrollHeight - scrollTop <= clientHeight + 20) {
       setDisplayLimit(prev => prev + 20);
     }
@@ -33,97 +47,32 @@ export const HusbandryLogs: React.FC<Props> = ({ animalId, animal }) => {
   
   const filters = ['ALL', ...validHusbandryTypes];
 
-  const fetchLogs = useCallback(async () => {
-    setLoading(true);
-    setIsOffline(false);
-    try {
-      const { data, error } = await supabase
-        .from('daily_logs')
-        .select('*')
-        .eq('animal_id', animalId)
-        .in('log_type', validHusbandryTypes)
-        .order('log_date', { ascending: false });
-
-      if (error) throw error;
-      setLogs(data || []);
-    } catch (err) {
-      console.error('Supabase fetch failed, falling back to cache:', err);
-      setIsOffline(true);
-      try {
-        if (db?.daily_logs) {
-          const cachedLogs = await db.daily_logs
-            .where('animal_id')
-            .equals(animalId)
-            .reverse()
-            .sortBy('log_date');
-            
-          const husbandryCached = cachedLogs.filter(log => 
-            validHusbandryTypes.includes(log.log_type.toUpperCase())
-          );
-          setLogs(husbandryCached || []);
-        } else {
-          setLogs([]);
-        }
-      } catch {
-        setLogs([]);
-      }
-    } finally {
-      setLoading(false);
-    }
-  }, [animalId]);
-
-  useEffect(() => {
-    fetchLogs();
-  }, [fetchLogs]);
-
   const handleSaveLog = async (entry: LogEntry) => {
     try {
-      const { error } = await supabase.from('daily_logs').upsert([entry]);
-      if (error) throw error;
+      await db.daily_records.upsert({
+        ...entry,
+        record_type: 'daily_logs_v2',
+        is_deleted: false
+      });
+      setIsAddModalOpen(false);
+      setSelectedLog(null);
     } catch (err) {
-      console.warn('Network unavailable. Queueing log to local cache...', err);
-      if (db?.daily_logs && db?.sync_queue) {
-        await db.daily_logs.put(entry);
-        await db.sync_queue.add({
-          table_name: 'daily_logs',
-          record_id: entry.id,
-          operation: 'upsert',
-          payload: entry as unknown as Record<string, unknown>,
-          status: 'pending',
-          priority: 1,
-          retry_count: 0,
-          created_at: new Date().toISOString()
-        });
-      }
+      console.error('Failed to save log:', err);
+      alert('Failed to save log. Please try again.');
     }
-    
-    setIsAddModalOpen(false);
-    setSelectedLog(null);
-    fetchLogs();
   };
 
   const handleDeleteLog = async (id: string) => {
     if (!window.confirm('Are you sure you want to delete this log?')) return;
     try {
-      const { error } = await supabase.from('daily_logs').delete().eq('id', id);
-      if (error) throw error;
-    } catch (err) {
-      console.warn('Network unavailable. Queueing delete to local cache...', err);
-      if (db?.daily_logs && db?.sync_queue) {
-        await db.daily_logs.delete(id);
-        await db.sync_queue.add({
-          table_name: 'daily_logs',
-          record_id: id,
-          operation: 'delete',
-          payload: { id },
-          status: 'pending',
-          priority: 1,
-          retry_count: 0,
-          created_at: new Date().toISOString()
-        });
+      const doc = await db.daily_records.findOne(id).exec();
+      if (doc) {
+        await doc.patch({ is_deleted: true });
       }
+    } catch (err) {
+      console.error('Failed to delete log:', err);
+      alert('Failed to delete log. Please try again.');
     }
-    fetchLogs();
   };
 
   const filteredLogs = useMemo(() => {
@@ -170,15 +119,10 @@ export const HusbandryLogs: React.FC<Props> = ({ animalId, animal }) => {
     }
   };
 
+  const currentDate = useMemo(() => new Date(), []);
+
   return (
     <div className="space-y-2 relative">
-      {isOffline && (
-        <div className="bg-amber-50 border border-amber-200 p-3 rounded-lg flex items-center gap-2 text-xs text-amber-800">
-          <AlertTriangle size={16} />
-          <span>Viewing cached compliance data (14-day local cache active).</span>
-        </div>
-      )}
-
       <div className="flex gap-2 flex-wrap">
         {filters.map(f => (
           <button 
@@ -219,7 +163,7 @@ export const HusbandryLogs: React.FC<Props> = ({ animalId, animal }) => {
               filteredLogs.slice(0, displayLimit).map(log => (
                 <tr key={log.id} className="hover:bg-slate-50">
                   <td className="px-2 py-2 text-slate-700">
-                    {new Date(log.log_date || log.created_at || Date.now()).toLocaleDateString()}
+                    {new Date(log.log_date || log.created_at || currentDate).toLocaleDateString()}
                   </td>
                   <td className="px-2 py-2">
                     <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${getTypeColor(log.log_type)}`}>

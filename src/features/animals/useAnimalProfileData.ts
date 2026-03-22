@@ -1,64 +1,68 @@
-import { db } from '../../lib/db';
-import { useHybridQuery, archiveAnimal as archiveAnimalDataEngine } from '../../lib/dataEngine';
-import { supabase } from '../../lib/supabase';
+import { useState, useEffect } from 'react';
+import { db } from '../../lib/rxdb';
 import { Animal, LogEntry, Task } from '../../types';
 
 export function useAnimalProfileData(animalId: string) {
-  // 1. Fetch from live collection
-  const liveAnimal = useHybridQuery<Animal | null>(
-    'animals',
-    supabase.from('animals').select('*').eq('id', animalId).maybeSingle(),
-    async () => {
-      if (!animalId) return null;
-      const a = await db.animals.get(animalId);
-      return a || null; // Force null if undefined
-    },
-    [animalId]
-  );
+  const [animal, setAnimal] = useState<Animal | null>(null);
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [isLoading, setIsLoading] = useState(!db || !animalId ? false : true);
 
-  // 2. Fetch from archived collection
-  const archivedAnimal = useHybridQuery<Animal | null>(
-    'archived_animals',
-    supabase.from('archived_animals').select('*').eq('id', animalId).maybeSingle(),
-    async () => {
-      if (!animalId) return null;
-      const a = await db.archived_animals.get(animalId);
-      return a || null; // Force null if undefined
-    },
-    [animalId]
-  );
+  useEffect(() => {
+    if (!db || !animalId) {
+      return;
+    }
 
-  const logs = useHybridQuery<LogEntry[]>(
-    'daily_logs',
-    supabase.from('daily_logs').select('*').eq('animal_id', animalId),
-    () => (animalId ? db.daily_logs.where('animal_id').equals(animalId).toArray() : []),
-    [animalId]
-  );
+    // Subscribe to animal (could be in live or archived)
+    const animalSub = db.animals.findOne(animalId).$.subscribe(doc => {
+      if (doc) {
+        setAnimal(doc.toJSON() as Animal);
+      } else {
+        setAnimal(null);
+      }
+      setIsLoading(false);
+    });
 
-  const tasks = useHybridQuery<Task[]>(
-    'tasks',
-    supabase.from('tasks').select('*').eq('animal_id', animalId),
-    () => (animalId ? db.tasks.where('animal_id').equals(animalId).toArray() : []),
-    [animalId]
-  );
+    // Subscribe to logs
+    const logsSub = db.daily_records.find({
+      selector: { animal_id: animalId }
+    }).$.subscribe(docs => {
+      setLogs(docs.map(d => d.toJSON() as LogEntry));
+    });
 
-  // 3. Resolve Loading State
-  // It is ONLY loading if the queries are strictly undefined (initial fetch state)
-  const isLoading = liveAnimal === undefined || archivedAnimal === undefined || logs === undefined || tasks === undefined;
+    // Subscribe to tasks
+    const tasksSub = db.tasks.find({
+      selector: { animal_id: animalId }
+    }).$.subscribe(docs => {
+      setTasks(docs.map(d => d.toJSON() as Task));
+    });
 
-  // 4. Determine Active Record
-  const animal = liveAnimal || archivedAnimal || null;
+    return () => {
+      animalSub.unsubscribe();
+      logsSub.unsubscribe();
+      tasksSub.unsubscribe();
+    };
+  }, [animalId]);
 
   const archiveAnimal = async (reason: string, type: NonNullable<Animal['archive_type']>) => {
-    if (animal) {
-      await archiveAnimalDataEngine(animal, reason, type);
+    if (!db || !animal) return;
+    const doc = await db.animals.findOne(animal.id).exec();
+    if (doc) {
+      await doc.patch({
+        record_type: 'archived_animals',
+        archived: true,
+        archive_reason: reason,
+        archive_type: type,
+        archived_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      });
     }
   };
 
   return {
-    animal: animal || null,
-    logs: logs || [],
-    tasks: tasks || [],
+    animal,
+    logs,
+    tasks,
     orgProfile: { name: 'Kent Owl Academy', logo_url: '' },
     allAnimals: [],
     isLoading,

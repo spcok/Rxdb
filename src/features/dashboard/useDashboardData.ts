@@ -1,9 +1,7 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Animal, AnimalCategory, LogType, LogEntry } from '../../types';
-import { db } from '../../lib/db';
-import { supabase } from '../../lib/supabase';
+import { db } from '../../lib/rxdb';
 import { useTaskData } from '../husbandry/useTaskData';
-import { useHybridQuery } from '../../lib/dataEngine';
 
 export interface EnhancedAnimal extends Animal {
   todayWeight?: LogEntry;
@@ -26,39 +24,46 @@ export interface PendingTask {
 }
 
 export function useDashboardData(activeTab: AnimalCategory | 'ARCHIVED', viewDate: string) {
-  const liveAnimalsRaw = useHybridQuery<Animal[]>(
-    'animals', 
-    supabase.from('animals').select('*'),
-    () => db.animals.toArray(), 
-    []
-  );
-  const archivedAnimalsRaw = useHybridQuery<Animal[]>(
-    'archived_animals', 
-    supabase.from('archived_animals').select('*'),
-    () => db.archived_animals.toArray(), 
-    []
-  );
-  const archivedAnimals = useMemo(() => archivedAnimalsRaw || [], [archivedAnimalsRaw]);
-  const logsRaw = useHybridQuery<LogEntry[]>(
-    'daily_logs', 
-    supabase.from('daily_logs').select('*').eq('log_date', viewDate),
-    () => db.daily_logs.where('log_date').equals(viewDate).toArray(), 
-    [viewDate]
-  );
+  const [liveAnimals, setLiveAnimals] = useState<Animal[]>([]);
+  const [archivedAnimals, setArchivedAnimals] = useState<Animal[]>([]);
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    let isMounted = true;
+    if (!db) return;
+
+    const liveSub = db.animals.find({
+      selector: { record_type: 'animals' }
+    }).$.subscribe(docs => {
+      if (isMounted) {
+        setLiveAnimals(docs.map(d => d.toJSON() as Animal));
+        setIsLoading(false);
+      }
+    });
+
+    const archivedSub = db.animals.find({
+      selector: { record_type: 'archived_animals' }
+    }).$.subscribe(docs => {
+      if (isMounted) setArchivedAnimals(docs.map(d => d.toJSON() as Animal));
+    });
+
+    const logsSub = db.daily_records.find({
+      selector: { log_date: viewDate }
+    }).$.subscribe(docs => {
+      if (isMounted) setLogs(docs.map(d => d.toJSON() as LogEntry));
+    });
+
+    return () => {
+      isMounted = false;
+      liveSub.unsubscribe();
+      archivedSub.unsubscribe();
+      logsSub.unsubscribe();
+    };
+  }, [viewDate]);
+
+  const allLogs = logs; // Simplified as per previous redundancy
   
-  // Note: Following prompt instructions to optimize query, but this may impact historical feed tracking
-  const allLogsRaw = useHybridQuery<LogEntry[]>(
-    'daily_logs', 
-    supabase.from('daily_logs').select('*').eq('log_date', viewDate),
-    () => db.daily_logs.where('log_date').equals(viewDate).toArray(), 
-    [viewDate]
-  );
-  
-  const liveAnimals = useMemo(() => liveAnimalsRaw || [], [liveAnimalsRaw]);
-  const logs = useMemo(() => logsRaw || [], [logsRaw]);
-  const allLogs = useMemo(() => allLogsRaw || [], [allLogsRaw]);
-  
-  const isLoading = liveAnimalsRaw === undefined;
   const [searchTerm, setSearchTerm] = useState('');
   const [sortOption, setSortOption] = useState('alpha-asc');
   const [isOrderLocked, setIsOrderLocked] = useState(false);

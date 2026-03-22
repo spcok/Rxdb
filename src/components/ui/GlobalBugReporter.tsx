@@ -2,8 +2,7 @@ import React, { useState } from 'react';
 import { MessageSquareWarning, X, Send, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import { useAuthStore } from '../../store/authStore';
-import { db } from '../../lib/db';
-import { processSyncQueue } from '../../lib/syncEngine';
+import { db } from '../../lib/rxdb';
 
 const GlobalBugReporter: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
@@ -26,7 +25,10 @@ const GlobalBugReporter: React.FC = () => {
     const reportId = uuidv4();
     const payload = {
       id: reportId,
+      record_type: 'bug_report',
       created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      is_deleted: false,
       message: `[${severity.toUpperCase()}] ${title.trim()}\n\n${message.trim()}`,
       is_online: navigator.onLine,
       url: window.location.href,
@@ -35,19 +37,9 @@ const GlobalBugReporter: React.FC = () => {
     };
 
     try {
-      await db.sync_queue.add({
-        table_name: 'bug_reports',
-        record_id: reportId,
-        operation: 'upsert',
-        payload: payload,
-        created_at: new Date().toISOString(),
-        status: 'pending',
-        priority: 5, // Lower priority (5) so clinical/medical data syncs first
-        retry_count: 0
-      });
-
-      // Fire and forget background sync
-      processSyncQueue().catch(console.error);
+      if (db) {
+        await db.admin_records.insert(payload);
+      }
 
       setIsSuccess(true);
       setTitle('');

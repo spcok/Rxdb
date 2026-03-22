@@ -3,7 +3,8 @@ import { AnimalCategory, UserRole } from '../types';
 import { AppContext, AppContextType } from './Context';
 import { useTimesheetData } from '../features/staff/useTimesheetData';
 import { useAuthStore } from '../store/authStore';
-import { initDatabase, RxDatabase } from '../lib/rxdb';
+import { initDatabase } from '../lib/rxdb';
+import { RxDatabase } from 'rxdb';
 
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const { clockIn, clockOut, timesheets } = useTimesheetData();

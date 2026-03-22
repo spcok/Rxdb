@@ -14,7 +14,6 @@ import { useAppData } from '../../context/Context';
 import { useOrgSettings } from '../../features/settings/useOrgSettings';
 import GlobalBugReporter from '../ui/GlobalBugReporter';
 import { useNetworkStatus } from '../../hooks/useNetworkStatus';
-import { processSyncQueue } from '../../lib/syncEngine';
 import { UpdateBanner } from './UpdateBanner';
 import { InstallButton } from '../ui/InstallButton';
 
@@ -77,17 +76,6 @@ const Layout: React.FC<LayoutProps> = () => {
   const { settings: orgSettings } = useOrgSettings();
   const { isOnline } = useNetworkStatus();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-
-  useEffect(() => {
-    const handleOnline = () => {
-      console.log('🌍 Network restored. Firing sync queue...');
-      processSyncQueue();
-    };
-    window.addEventListener('online', handleOnline);
-    // Also run once on initial load if online
-    if (navigator.onLine) processSyncQueue();
-    return () => window.removeEventListener('online', handleOnline);
-  }, []);
 
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [fontSize, setFontSize] = useState<'small' | 'medium' | 'large' | 'xlarge'>('medium');
@@ -370,3 +358,4 @@ const Layout: React.FC<LayoutProps> = () => {
 };
 
 export default Layout;
+

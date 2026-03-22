@@ -1,14 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { X, Check, Camera, Loader2, Zap, Shield, History, Info, Globe, Skull, Users, Thermometer, Scale } from 'lucide-react';
 import { Animal, AnimalCategory, HazardRating, ConservationStatus, EntityType, MovementType, InternalMovement, ExternalTransfer, TransferType, TransferStatus } from '../../types';
 import { useAnimalForm } from './useAnimalForm';
 import { getAnimalIntelligence } from '../../services/geminiService';
 import { convertToGrams, convertFromGrams } from '../../services/weightUtils';
-import { mutateOnlineFirst } from '../../lib/dataEngine';
+import { Subscription } from 'rxjs';
+import { db } from '../../lib/rxdb';
 import { useOperationalLists } from '../../hooks/useOperationalLists';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../../lib/db';
 import Cropper from 'react-easy-crop';
 import { getCroppedImg } from '../../utils/cropImage';
 import { queueFileUpload } from '../../lib/storageEngine';
@@ -40,6 +39,40 @@ const AnimalFormModal: React.FC<AnimalFormModalProps> = ({ isOpen, onClose, init
   const [isCropping, setIsCropping] = useState(false);
   const [isUploadingCrop, setIsUploadingCrop] = useState(false);
   const [photoFile, setPhotoFile] = useState<File | null>(null);
+
+  const [parentMobs, setParentMobs] = useState<Animal[]>([]);
+  const [linkedChildrenCount, setLinkedChildrenCount] = useState(0);
+
+  useEffect(() => {
+    if (!db) return;
+
+    const parentMobsSub = db.animals.find({
+      selector: {
+        entity_type: EntityType.GROUP,
+        id: { $ne: initialData?.id || '' },
+        is_deleted: { $eq: false }
+      }
+    }).$.subscribe(docs => {
+      setParentMobs(docs.map(d => d.toJSON() as Animal));
+    });
+
+    let linkedChildrenSub: Subscription;
+    if (initialData?.id) {
+      linkedChildrenSub = db.animals.find({
+        selector: {
+          parent_mob_id: initialData.id,
+          is_deleted: { $eq: false }
+        }
+      }).$.subscribe(docs => {
+        setLinkedChildrenCount(docs.length);
+      });
+    }
+
+    return () => {
+      parentMobsSub.unsubscribe();
+      if (linkedChildrenSub) linkedChildrenSub.unsubscribe();
+    };
+  }, [initialData?.id]);
 
   const onFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
@@ -152,7 +185,11 @@ const AnimalFormModal: React.FC<AnimalFormModalProps> = ({ isOpen, onClose, init
             created_by: currentUser?.initials || 'SYSTEM',
             notes: 'Auto-generated from profile location update.'
           };
-          await mutateOnlineFirst('internal_movements', internalMovement, 'upsert');
+          await db.logistics_records.upsert({
+            ...internalMovement,
+            record_type: 'movements',
+            is_deleted: false
+          });
         }
       } else {
         if (['BORN', 'TRANSFERRED_IN', 'RESCUE'].includes(payload.acquisition_type)) {
@@ -168,7 +205,11 @@ const AnimalFormModal: React.FC<AnimalFormModalProps> = ({ isOpen, onClose, init
             status: TransferStatus.COMPLETED,
             notes: `Auto-generated from animal creation (Type: ${payload.acquisition_type}).`
           };
-          await mutateOnlineFirst('external_transfers', externalTransfer, 'upsert');
+          await db.logistics_records.upsert({
+            ...externalTransfer,
+            record_type: 'transfers',
+            is_deleted: false
+          });
         }
       }
     } catch (e) {
@@ -180,9 +221,11 @@ const AnimalFormModal: React.FC<AnimalFormModalProps> = ({ isOpen, onClose, init
         ...initialData,
         ...payload,
         id: targetId,
+        record_type: 'animals',
+        is_deleted: false
       } as Animal;
 
-      await mutateOnlineFirst('animals', animalData, 'upsert');
+      await db.animals.upsert(animalData);
       onClose();
     } catch (error) {
       console.error('Failed to save animal:', error);
@@ -243,16 +286,6 @@ const AnimalFormModal: React.FC<AnimalFormModalProps> = ({ isOpen, onClose, init
   const distroUrl = watch('distribution_map_url');
   const currentEntityType = watch('entity_type');
   const isBird = category === AnimalCategory.OWLS || category === AnimalCategory.RAPTORS;
-
-  const parentMobs = useLiveQuery(
-    () => db.animals.filter(a => a.entity_type === 'GROUP' && a.id !== initialData?.id).toArray(),
-    [initialData?.id]
-  );
-
-  const linkedChildrenCount = useLiveQuery(
-    () => initialData?.id ? db.animals.filter(a => a.parent_mob_id === initialData.id).count() : 0,
-    [initialData?.id]
-  ) || 0;
 
   // Track if Environmental Controls are required
   const [envNa, setEnvNa] = useState<boolean>(
