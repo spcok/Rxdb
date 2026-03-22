@@ -29,7 +29,7 @@ import ReportsDashboard from './features/reports/ReportsDashboard';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { initDatabase, startReplication, stopReplication } from './lib/rxdb';
 import { RxDatabase } from 'rxdb';
-import { isSupabaseConfigured } from './lib/supabase';
+import { supabase, isSupabaseConfigured } from './lib/supabase';
 
 export default function App() {
   const { initialize, isLoading, session } = useAuthStore();
@@ -56,7 +56,7 @@ export default function App() {
 
   useEffect(() => {
     if (db && session && isSupabaseConfigured()) {
-      startReplication(db);
+      startReplication(db, supabase);
     } else {
       stopReplication();
     }
