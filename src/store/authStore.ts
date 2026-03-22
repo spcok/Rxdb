@@ -2,9 +2,7 @@ import { create } from 'zustand';
 import { Session, User as SupabaseUser, AuthError } from '@supabase/supabase-js';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { User, UserRole } from '../types';
-import { db } from '../lib/db';
-import { mutateOnlineFirst } from '../lib/dataEngine';
-import { processSyncQueue } from '../lib/syncEngine';
+import { initDatabase } from '../lib/rxdb';
 
 interface AuthState {
   session: Session | null;
@@ -29,14 +27,10 @@ export const useAuthStore = create<AuthState>((set) => ({
     if (!isSupabaseConfigured()) {
       return { error: { message: 'Supabase is not configured', status: 500 } as AuthError };
     }
-    const { error, data } = await supabase.auth.signInWithPassword({
+    const { error } = await supabase.auth.signInWithPassword({
       email,
       password,
     });
-
-    if (!error && data.session && navigator.onLine) {
-      processSyncQueue().catch(err => console.error('🛠️ [Auth Store] Initial login sync failed:', err));
-    }
 
     return { error };
   },
@@ -55,54 +49,43 @@ export const useAuthStore = create<AuthState>((set) => ({
     if (!isSupabaseConfigured()) {
       console.warn('🛠️ [Auth Store] Supabase is not configured. Falling back to local cache.');
       try {
-        const localUser = await db.users.toCollection().first();
-        if (localUser) {
+        const database = await initDatabase();
+        const localUserDoc = await database.admin_records.findOne({ 
+          selector: { record_type: 'users' } 
+        }).exec();
+        
+        if (localUserDoc) {
+          const localUser = localUserDoc.toJSON() as User;
           const mockUser = { id: localUser.id, email: localUser.email } as SupabaseUser;
           const mockSession = { user: mockUser, access_token: 'offline-token' } as Session;
           set({ session: mockSession, user: mockUser, currentUser: localUser, isLoading: false });
         } else {
           set({ session: null, user: null, currentUser: null, isLoading: false });
         }
-      } catch {
+      } catch (err) {
+        console.error('🛠️ [Auth Store] Local fallback failed:', err);
         set({ session: null, user: null, currentUser: null, isLoading: false });
       }
       return;
     }
 
     try {
-      // 1. Try to get session from local storage immediately (fast)
       const { data: { session: localSession } } = await supabase.auth.getSession();
       
       if (localSession?.user) {
-        // We have a local session, try to sync role but don't block if offline
         await syncUserRole(localSession.user, set);
-        
-        if (navigator.onLine) {
-          processSyncQueue().catch(err => console.error('🛠️ [Auth Store] Boot sync failed:', err));
-        }
       } else {
-        // No local session, try a network refresh but with a short timeout
-        const getSessionPromise = supabase.auth.getSession();
-        const timeoutPromise = new Promise<{ data: { session: Session | null }, error: AuthError | null }>((_, reject) => 
-          setTimeout(() => reject(new Error('Session check timeout')), 2000)
-        );
-        
-        const { data: { session }, error } = await Promise.race([getSessionPromise, timeoutPromise]);
-        
+        const { data: { session }, error } = await supabase.auth.getSession();
         if (error) throw error;
         
         if (session?.user) {
           await syncUserRole(session.user, set);
-          
-          if (navigator.onLine) {
-            processSyncQueue().catch(err => console.error('🛠️ [Auth Store] Network boot sync failed:', err));
-          }
         } else {
           set({ session: null, user: null, currentUser: null, isLoading: false });
         }
       }
     } catch (error: unknown) {
-      console.warn('🛠️ [Auth QA] Session restoration failed or timed out. Checking local cache.', error);
+      console.warn('🛠️ [Auth QA] Session restoration failed. Checking local cache.', error);
       
       const errorMessage = error instanceof Error ? error.message : String(error);
 
@@ -112,10 +95,15 @@ export const useAuthStore = create<AuthState>((set) => ({
         return;
       }
 
-      // Fallback to Dexie if we are completely offline and Supabase failed
+      // Fallback to RxDB if we are completely offline and Supabase failed
       try {
-        const localUser = await db.users.toCollection().first();
-        if (localUser) {
+        const database = await initDatabase();
+        const localUserDoc = await database.admin_records.findOne({ 
+          selector: { record_type: 'users' } 
+        }).exec();
+        
+        if (localUserDoc) {
+          const localUser = localUserDoc.toJSON() as User;
           const mockUser = { id: localUser.id, email: localUser.email } as SupabaseUser;
           const mockSession = { user: mockUser, access_token: 'offline-token' } as Session;
           set({ session: mockSession, user: mockUser, currentUser: localUser, isLoading: false });
@@ -129,8 +117,7 @@ export const useAuthStore = create<AuthState>((set) => ({
 
     // Listen for changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      if ((event as any) === 'SIGNED_OUT' || (event as any) === 'USER_DELETED') {
+      if (event === 'SIGNED_OUT') {
         set({ session: null, user: null, currentUser: null, isLoading: false });
         return;
       }
@@ -160,8 +147,14 @@ async function syncUserRole(supabaseUser: SupabaseUser, set: (state: Partial<Aut
   }
 
   try {
-    // 1. Check if user exists in Dexie
-    let localUser = await db.users.where('email').equals(supabaseUser.email).first();
+    const database = await initDatabase();
+    
+    // 1. Check if user exists in RxDB admin_records
+    const localUserDoc = await database.admin_records.findOne({ 
+      selector: { record_type: 'users', email: supabaseUser.email } 
+    }).exec();
+    
+    let localUser = localUserDoc ? localUserDoc.toJSON() as User : null;
 
     if (!localUser) {
       // 1.5 Try fetching from Supabase directly if not in local cache
@@ -172,16 +165,17 @@ async function syncUserRole(supabaseUser: SupabaseUser, set: (state: Partial<Aut
         .maybeSingle();
       
       if (remoteUser && !remoteError) {
-        localUser = remoteUser as User;
-        await db.users.put(localUser);
+        localUser = { ...remoteUser, record_type: 'users' } as User;
+        await database.admin_records.upsert(localUser);
       } else if (supabaseUser.email === 'admin@kentowlacademy.com') {
-        // Bootstrap the primary admin if they exist in Auth but not in the users table
+        // Bootstrap the primary admin
         const newAdmin: User = {
           id: supabaseUser.id,
           email: supabaseUser.email,
           name: 'System Administrator',
           role: UserRole.ADMIN,
           initials: 'SA',
+          record_type: 'users',
           permissions: {
             dashboard: true,
             dailyLog: true,
@@ -191,23 +185,27 @@ async function syncUserRole(supabaseUser: SupabaseUser, set: (state: Partial<Aut
             safety: true,
             maintenance: true,
             settings: true,
-            userManagement: true
+            userManagement: true,
+            flightRecords: true,
+            feedingSchedule: true,
+            attendance: true,
+            holidayApprover: true,
+            attendanceManager: true,
+            missingRecords: true,
+            reports: true,
+            rounds: true
           }
         };
-        await mutateOnlineFirst('users', newAdmin, 'upsert');
+        await database.admin_records.upsert(newAdmin);
         localUser = newAdmin;
       }
     }
 
     if (localUser) {
-      // Update local user ID if it doesn't match Supabase (e.g. if created manually via email)
+      // Update local user ID if it doesn't match Supabase
       if (localUser.id !== supabaseUser.id) {
-        const oldId = localUser.id;
-        const updatedUser = { ...localUser, id: supabaseUser.id };
-        
-        await mutateOnlineFirst('users', updatedUser, 'upsert');
-        await mutateOnlineFirst('users', { id: oldId }, 'delete');
-        
+        const updatedUser = { ...localUser, id: supabaseUser.id, record_type: 'users' };
+        await database.admin_records.upsert(updatedUser);
         localUser = updatedUser;
       }
       
@@ -226,7 +224,6 @@ async function syncUserRole(supabaseUser: SupabaseUser, set: (state: Partial<Aut
         isLoading: false 
       });
     } else {
-      // 2. If localUser does NOT exist, treat as unauthorized
       console.warn('Unauthorized access attempt: User not found in local database', supabaseUser.email);
       await supabase.auth.signOut();
       set({ session: null, user: null, currentUser: null, isLoading: false });

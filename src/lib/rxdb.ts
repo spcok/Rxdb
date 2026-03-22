@@ -1,4 +1,5 @@
-import { createRxDatabase, addRxPlugin, RxDatabase, RxCollection } from 'rxdb';
+import { createRxDatabase, addRxPlugin, RxDatabase } from 'rxdb';
+export type { RxDatabase };
 import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie';
 import { RxDBDevModePlugin } from 'rxdb/plugins/dev-mode';
 import { wrappedValidateAjvStorage } from 'rxdb/plugins/validate-ajv';
@@ -19,19 +20,20 @@ const LIBRARIAN_MAP: Record<string, string[]> = {
   tasks: ['tasks']
 };
 
+export let db: RxDatabase;
 let dbPromise: Promise<RxDatabase> | null = null;
-let replicationStates: RxSupabaseReplicationState<any>[] = [];
+let replicationStates: RxSupabaseReplicationState<unknown>[] = [];
 
-const createSchema = (name: string, properties: any = {}) => ({
+const createSchema = (name: string, properties: Record<string, unknown> = {}) => ({
   title: `${name} schema`,
   version: 0,
   primaryKey: 'id',
   type: 'object',
   properties: {
-    id: { type: 'string', maxLength: 100 },
+    id: { type: 'string', maxLength: 100 }, // Corrected: No 'primary: true'
     updated_at: { type: 'string' },
     is_deleted: { type: 'boolean' },
-    record_type: { type: 'string' }, // Discriminator for Supabase routing
+    record_type: { type: 'string' }, // The Discriminator
     ...properties
   },
   required: ['id', 'record_type']
@@ -41,21 +43,21 @@ export const initDatabase = async () => {
   if (dbPromise) return dbPromise;
 
   dbPromise = (async () => {
-    const db = await createRxDatabase({
-      name: 'animaldb_v4',
+    db = await createRxDatabase({
+      name: 'animaldb_v6', // New name to avoid old schema conflicts
       storage: wrappedValidateAjvStorage({ storage: getRxStorageDexie() }),
       ignoreDuplicate: true,
     });
 
     await db.addCollections({
-      animals: { schema: createSchema('animals', { name: { type: 'string' }, species: { type: 'string' } }) },
-      daily_records: { schema: createSchema('daily', { date: { type: 'string' }, value: { type: 'string' } }) },
-      clinical_records: { schema: createSchema('clinical', { animal_id: { type: 'string' }, note_text: { type: 'string' } }) },
-      logistics_records: { schema: createSchema('logistics', { animal_id: { type: 'string' }, notes: { type: 'string' } }) },
-      staff_records: { schema: createSchema('staff', { staff_name: { type: 'string' }, status: { type: 'string' } }) },
-      safety_records: { schema: createSchema('safety', { description: { type: 'string' }, severity: { type: 'string' } }) },
-      admin_records: { schema: createSchema('admin', { type: { type: 'string' }, value: { type: 'string' } }) },
-      tasks: { schema: createSchema('tasks', { title: { type: 'string' }, completed: { type: 'boolean' } }) }
+      animals: { schema: createSchema('animals', { name: { type: 'string' } }) },
+      daily_records: { schema: createSchema('daily', { value: { type: 'string' } }) },
+      clinical_records: { schema: createSchema('clinical', { animal_id: { type: 'string' } }) },
+      logistics_records: { schema: createSchema('logistics', { animal_id: { type: 'string' } }) },
+      staff_records: { schema: createSchema('staff', { staff_name: { type: 'string' } }) },
+      safety_records: { schema: createSchema('safety', { description: { type: 'string' } }) },
+      admin_records: { schema: createSchema('admin', { email: { type: 'string' }, type: { type: 'string' } }) },
+      tasks: { schema: createSchema('tasks', { title: { type: 'string' } }) }
     });
 
     return db;
@@ -64,9 +66,9 @@ export const initDatabase = async () => {
   return dbPromise;
 };
 
-export const startReplication = async (db: RxDatabase) => {
+export const startReplication = async (database: RxDatabase) => {
   for (const [colName, tables] of Object.entries(LIBRARIAN_MAP)) {
-    const collection = db.collections[colName];
+    const collection = database.collections[colName];
     for (const tableName of tables) {
       const replicationState = replicateSupabase({
         collection,
@@ -78,7 +80,10 @@ export const startReplication = async (db: RxDatabase) => {
           modifier: (doc) => ({ ...doc, record_type: tableName }),
         },
         push: {
-          filter: (doc) => doc.record_type === tableName,
+          modifier: (doc) => {
+            if (doc.record_type !== tableName) return null;
+            return doc;
+          }
         },
         live: true,
       });

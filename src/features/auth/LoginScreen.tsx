@@ -18,7 +18,7 @@ const LoginScreen: React.FC = () => {
     try {
       const { error: loginError } = await login(email, password);
       if (loginError) {
-        setError('Invalid credentials. Please check your email and password.');
+        setError(loginError.message);
       }
     } catch {
       setError('An unexpected error occurred. Please try again later.');

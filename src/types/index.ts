@@ -252,6 +252,7 @@ export interface UserPermissions {
 
 export interface UserProfile {
   id: string;
+  record_type?: string;
   email: string;
   name: string;
   role: UserRole;
