@@ -11,58 +11,19 @@ export let db: RxDatabase;
 let dbPromise: Promise<RxDatabase> | null = null;
 let replicationStates: RxSupabaseReplicationState<unknown>[] = [];
 
-const REPLICATION_CONFIG: Record<string, { table: string, record_type: string }[]> = {
-  animals: [
-    { table: 'animals', record_type: 'animals' },
-    { table: 'archived_animals', record_type: 'archived_animals' }
-  ],
-  daily_records: [
-    { table: 'daily_logs', record_type: 'daily_logs_v2' },
-    { table: 'daily_rounds', record_type: 'daily_rounds' }
-  ],
-  clinical_records: [
-    { table: 'medical_logs', record_type: 'medical_logs' },
-    { table: 'mar_charts', record_type: 'mar_charts' },
-    { table: 'quarantine_records', record_type: 'quarantine_records' },
-    { table: 'clinical_note', record_type: 'clinical_note' }
-  ],
-  logistics_records: [
-    { table: 'internal_movements', record_type: 'internal_movements' },
-    { table: 'external_transfers', record_type: 'external_transfers' },
-    { table: 'movements', record_type: 'movements' },
-    { table: 'transfers', record_type: 'transfers' }
-  ],
-  staff_records: [
-    { table: 'shifts', record_type: 'shifts' },
-    { table: 'holidays', record_type: 'holidays' },
-    { table: 'timesheets', record_type: 'timesheets' }
-  ],
-  maintenance_logs: [
-    { table: 'maintenance_logs', record_type: 'maintenance_logs' }
-  ],
-  incidents: [
-    { table: 'incidents', record_type: 'incidents' }
-  ],
-  first_aid_logs: [
-    { table: 'first_aid_logs', record_type: 'first_aid_logs' }
-  ],
-  safety_drills: [
-    { table: 'safety_drills', record_type: 'safety_drills' }
-  ],
-  operational_lists: [
-    { table: 'operational_lists', record_type: 'operational_lists' }
-  ],
-  admin_records: [
-    { table: 'users', record_type: 'users' },
-    { table: 'organisations', record_type: 'organisations' },
-    { table: 'role_permissions', record_type: 'role_permissions' },
-    { table: 'contacts', record_type: 'contacts' },
-    { table: 'zla_documents', record_type: 'zla_documents' },
-    { table: 'bug_reports', record_type: 'bug_reports' }
-  ],
-  tasks: [
-    { table: 'tasks', record_type: 'tasks' }
-  ]
+const LIBRARIAN_MAP: Record<string, string[]> = {
+  animals: ['animals', 'archived_animals'],
+  daily_records: ['daily_logs', 'daily_rounds'],
+  clinical_records: ['medical_logs', 'mar_charts', 'quarantine_records', 'clinical_note'],
+  logistics_records: ['internal_movements', 'external_transfers', 'movements', 'transfers'],
+  staff_records: ['shifts', 'holidays', 'timesheets'],
+  maintenance_logs: ['maintenance_logs'],
+  incidents: ['incidents'],
+  first_aid_logs: ['first_aid_logs'],
+  safety_drills: ['safety_drills'],
+  operational_lists: ['operational_lists'],
+  admin_records: ['users', 'organisations', 'role_permissions', 'contacts', 'zla_documents', 'bug_reports'],
+  tasks: ['tasks']
 };
 
 const baseProperties = {
@@ -347,20 +308,49 @@ export const initDatabase = async () => {
 
 export const startReplication = async (database: RxDatabase) => {
   if (!database) return;
-  for (const [colName, configs] of Object.entries(REPLICATION_CONFIG)) {
+
+  // 1. FATAL CRASH PREVENTION: Ensure Supabase is valid before touching the plugin
+  if (!supabase || typeof supabase.channel !== 'function') {
+    console.warn('🚨 [Sync Guard] Replication aborted: Supabase client is undefined or missing realtime capabilities. Check supabase.ts or circular imports.');
+    return;
+  }
+
+  console.log('🔄 [RxDB Sync] Initiating Supabase replication engine...');
+
+  for (const [colName, tables] of Object.entries(LIBRARIAN_MAP)) {
     const collection = database.collections[colName];
-    for (const config of configs) {
-      const state = replicateSupabase({
-        collection,
-        replicationIdentifier: `${colName}_${config.table}_v3`,
-        client: supabase,
-        tableName: config.table,
-        pull: { batchSize: 100, modifier: (doc) => ({ ...doc, record_type: config.record_type }) },
-        // @ts-expect-error - filter is supported by replicateSupabase but missing from types
-        push: { filter: (doc) => doc.record_type === config.record_type },
-        live: true
-      });
-      replicationStates.push(state);
+    if (!collection) continue;
+
+    for (const tableName of tables) {
+      try {
+        const state = replicateSupabase({
+          collection,
+          replicationIdentifier: `${colName}_${tableName}_v6`, // Force fresh state
+          supabaseClient: supabase,
+          table: tableName,
+          deletedField: 'is_deleted',
+          pull: { 
+            batchSize: 100, 
+            modifier: (doc) => ({ ...doc, record_type: tableName }) 
+          },
+          push: { 
+            // @ts-expect-error - filter property is supported by replicateSupabase but missing from types
+            filter: (doc) => doc.record_type === tableName 
+          },
+          live: true
+        });
+        
+        // 2. SILENCE PLUGIN CRASHES: Catch internal errors before they hit the window
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        state.error$.subscribe((err: any) => {
+          if (err?.message && err.message.includes('channel')) return; // Suppress loop
+          console.error(`⚠️ [Sync Error - ${tableName}]:`, err?.message || err);
+        });
+        
+        replicationStates.push(state);
+      } catch (err) {
+        console.error(`💥 [Sync Setup Failed - ${tableName}]:`, err);
+      }
     }
   }
 };
