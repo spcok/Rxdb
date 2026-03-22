@@ -1,5 +1,4 @@
 import { createRxDatabase, addRxPlugin, RxDatabase } from 'rxdb';
-export type { RxDatabase };
 import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie';
 import { RxDBDevModePlugin } from 'rxdb/plugins/dev-mode';
 import { wrappedValidateAjvStorage } from 'rxdb/plugins/validate-ajv';
@@ -8,7 +7,10 @@ import { supabase } from './supabase';
 
 addRxPlugin(RxDBDevModePlugin);
 
-// The Librarian's Master Map: 8 Collections -> 24 Supabase Tables
+export let db: RxDatabase;
+let dbPromise: Promise<RxDatabase> | null = null;
+let replicationStates: RxSupabaseReplicationState<any>[] = [];
+
 const LIBRARIAN_MAP: Record<string, string[]> = {
   animals: ['animals', 'archived_animals'],
   daily_records: ['daily_logs', 'daily_rounds'],
@@ -20,80 +22,77 @@ const LIBRARIAN_MAP: Record<string, string[]> = {
   tasks: ['tasks']
 };
 
-export let db: RxDatabase;
-let dbPromise: Promise<RxDatabase> | null = null;
-let replicationStates: RxSupabaseReplicationState<unknown>[] = [];
-
-const createSchema = (name: string, properties: Record<string, unknown> = {}): any => ({
-  title: `${name} schema`,
-  version: 0,
-  primaryKey: 'id',
-  type: 'object',
-  properties: {
-    id: { type: 'string', maxLength: 100 },
-    updated_at: { type: 'string' },
-    is_deleted: { type: 'boolean' },
-    record_type: { type: 'string' }, // The Discriminator
-    ...properties
-  },
-  required: ['id', 'record_type'],
-  additionalProperties: true // Allow flexible fields for the Librarian architecture
-});
+const baseProperties = {
+  id: { type: 'string', maxLength: 100 },
+  updated_at: { type: 'string' },
+  is_deleted: { type: 'boolean' },
+  record_type: { type: 'string' }
+};
 
 export const initDatabase = async () => {
   if (dbPromise) return dbPromise;
-
   dbPromise = (async () => {
+    console.log('💾 [RxDB] Initializing engine (v9)...');
+    
     db = await createRxDatabase({
-      name: 'animaldb_v7', // New name to avoid old schema conflicts
+      name: 'animaldb_v9', 
       storage: wrappedValidateAjvStorage({ storage: getRxStorageDexie() }),
       ignoreDuplicate: true,
     });
 
     await db.addCollections({
-      animals: { schema: createSchema('animals', { name: { type: 'string' } }) },
-      daily_records: { schema: createSchema('daily', { value: { type: 'string' } }) },
-      clinical_records: { schema: createSchema('clinical', { animal_id: { type: 'string' } }) },
-      logistics_records: { schema: createSchema('logistics', { animal_id: { type: 'string' } }) },
-      staff_records: { schema: createSchema('staff', { staff_name: { type: 'string' } }) },
-      safety_records: { schema: createSchema('safety', { description: { type: 'string' } }) },
-      admin_records: { schema: createSchema('admin', { email: { type: 'string' }, type: { type: 'string' } }) },
-      tasks: { schema: createSchema('tasks', { title: { type: 'string' } }) }
+      animals: { schema: { version: 0, primaryKey: 'id', type: 'object', properties: { ...baseProperties, name: { type: 'string' }, species: { type: 'string' } }, required: ['id', 'record_type'] } },
+      admin_records: { 
+        schema: { 
+          version: 0, 
+          primaryKey: 'id', 
+          type: 'object', 
+          properties: { 
+            ...baseProperties, 
+            email: { type: 'string' },
+            name: { type: 'string' },
+            role: { type: 'string' },
+            initials: { type: 'string' },
+            permissions: { type: 'object' },
+            type: { type: 'string' },
+            value: { type: 'string' }
+          }, 
+          required: ['id', 'record_type'] 
+        } 
+      },
+      daily_records: { schema: { version: 0, primaryKey: 'id', type: 'object', properties: { ...baseProperties, animal_id: { type: 'string' }, value: { type: 'string' }, date: { type: 'string' } }, required: ['id', 'record_type'] } },
+      clinical_records: { schema: { version: 0, primaryKey: 'id', type: 'object', properties: { ...baseProperties, animal_id: { type: 'string' }, note_text: { type: 'string' } }, required: ['id', 'record_type'] } },
+      logistics_records: { schema: { version: 0, primaryKey: 'id', type: 'object', properties: { ...baseProperties, animal_id: { type: 'string' }, destination: { type: 'string' } }, required: ['id', 'record_type'] } },
+      staff_records: { schema: { version: 0, primaryKey: 'id', type: 'object', properties: { ...baseProperties, user_id: { type: 'string' }, staff_name: { type: 'string' } }, required: ['id', 'record_type'] } },
+      safety_records: { schema: { version: 0, primaryKey: 'id', type: 'object', properties: { ...baseProperties, description: { type: 'string' }, severity: { type: 'string' } }, required: ['id', 'record_type'] } },
+      tasks: { schema: { version: 0, primaryKey: 'id', type: 'object', properties: { ...baseProperties, title: { type: 'string' } }, required: ['id', 'record_type'] } }
     });
 
     return db;
   })();
-
   return dbPromise;
 };
 
 export const startReplication = async (database: RxDatabase) => {
+  if (!database) return;
   for (const [colName, tables] of Object.entries(LIBRARIAN_MAP)) {
     const collection = database.collections[colName];
     for (const tableName of tables) {
-      const replicationState = replicateSupabase({
+      const state = replicateSupabase({
         collection,
         replicationIdentifier: `${colName}_${tableName}`,
         client: supabase,
         tableName: tableName,
-        pull: {
-          batchSize: 100,
-          modifier: (doc) => ({ ...doc, record_type: tableName }),
-        },
-        push: {
-          modifier: (doc) => {
-            if (doc.record_type !== tableName) return null;
-            return doc;
-          }
-        },
-        live: true,
+        pull: { batchSize: 100, modifier: (doc) => ({ ...doc, record_type: tableName }) },
+        push: { filter: (doc) => doc.record_type === tableName },
+        live: true
       });
-      replicationStates.push(replicationState);
+      replicationStates.push(state);
     }
   }
 };
 
-export function stopReplication() {
+export const stopReplication = () => {
   replicationStates.forEach(s => s.cancel());
   replicationStates = [];
-}
+};

@@ -1,20 +1,11 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+// HARDCODED CREDENTIALS - Bypasses Vite environment variable issues
+const SUPABASE_URL = 'https://dgnncauvnzivsxxiifvs.supabase.co'; 
+const SUPABASE_ANON_KEY = 'sb_publishable_r0yjFsdxKolSme2t2iUs4Q_F0zIenxX';
 
-// Debugging: These will help you verify if AI Studio is passing the keys
-console.log('🛠️ [Supabase Config] URL Found:', !!supabaseUrl);
-console.log('🛠️ [Supabase Config] Key Found:', !!supabaseAnonKey);
+console.log('🌐 [Supabase] Using hardcoded credentials.');
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  console.info('ℹ️ [Supabase] Environment variables are missing. The application will operate in Offline Mode.');
-}
+export const isSupabaseConfigured = () => true;
 
-// Create the client (it will be null-safe even if variables are missing)
-export const supabase = createClient(
-  supabaseUrl || 'https://placeholder.supabase.co', 
-  supabaseAnonKey || 'placeholder'
-);
-
-export const isSupabaseConfigured = () => !!supabaseUrl && !!supabaseAnonKey;
+export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
