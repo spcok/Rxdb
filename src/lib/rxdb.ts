@@ -9,6 +9,7 @@ addRxPlugin(RxDBDevModePlugin);
 export let db: RxDatabase;
 let dbPromise: Promise<RxDatabase> | null = null;
 let replicationStates: RxSupabaseReplicationState<unknown>[] = [];
+let pollingIntervals: ReturnType<typeof setInterval>[] = [];
 
 const REPLICATION_CONFIG: Record<string, { table: string, record_type: string }[]> = {
   animals: [{ table: 'animals', record_type: 'animals' }, { table: 'archived_animals', record_type: 'archived_animals' }],
@@ -59,29 +60,45 @@ export const initDatabase = async () => {
 export const startReplication = async (database: RxDatabase, supabaseClientInstance: unknown) => {
   if (!database) return;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  if (!supabaseClientInstance || typeof (supabaseClientInstance as any).channel !== 'function') { console.error('🚨 [Sync] Invalid Supabase client injected.'); return; }
+  if (!supabaseClientInstance || typeof (supabaseClientInstance as any).channel !== 'function') { 
+    console.error('🚨 [Sync] Invalid Supabase client injected.'); 
+    return; 
+  }
+  
+  console.log('🔄 [RxDB] Starting HTTP-Only Polling Sync...');
   await new Promise(resolve => setTimeout(resolve, 500));
+
   for (const [colName, configs] of Object.entries(REPLICATION_CONFIG)) {
     const collection = database.collections[colName];
     if (!collection) continue;
+
     for (const config of configs) {
-      try {
-        const state = replicateSupabase({
-          collection,
-          replicationIdentifier: `${colName}_${config.table}_v16`,
-          supabaseClient: supabaseClientInstance,
-          table: config.table,
-          deletedField: 'is_deleted',
-          pull: { batchSize: 100, modifier: (doc) => ({ ...doc, record_type: config.record_type }) },
-          push: { filter: (doc) => doc.record_type === config.record_type },
-          live: true
+      const runSync = () => {
+        try {
+          const state = replicateSupabase({
+            collection,
+            replicationIdentifier: `${colName}_${config.table}_http_v1`,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            supabaseClient: supabaseClientInstance as any,
+            table: config.table,
+            deletedField: 'is_deleted',
+            pull: { batchSize: 100, modifier: (doc) => ({ ...doc, record_type: config.record_type }) },
+            push: { filter: (doc) => doc.record_type === config.record_type },
+            live: false // 🚨 CRITICAL: Disables WebSockets and .channel()
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          } as any);
+          
+          state.error$.subscribe((err: unknown) => console.error(`[Sync] ${config.table}:`, err));
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        } as any);
-        state.error$.subscribe((err: { message?: string }) => { if (!err?.message?.includes('channel')) console.error(`[Sync] ${config.table}:`, err); });
-        replicationStates.push(state);
-      } catch (err) {
-        console.error(`[Sync] ${config.table} setup failed:`, err);
-      }
+          replicationStates.push(state as any);
+        } catch (err) {
+          console.error(`[Sync] ${config.table} polling error:`, err);
+        }
+      };
+
+      runSync();
+      const interval = setInterval(runSync, 30000);
+      pollingIntervals.push(interval);
     }
   }
 };
@@ -89,4 +106,6 @@ export const startReplication = async (database: RxDatabase, supabaseClientInsta
 export const stopReplication = () => {
   replicationStates.forEach(s => s.cancel());
   replicationStates = [];
+  pollingIntervals.forEach((i: ReturnType<typeof setInterval>) => clearInterval(i));
+  pollingIntervals = [];
 };
