@@ -1,8 +1,8 @@
 import { create } from 'zustand';
 import { Session, User as SupabaseUser, AuthError } from '@supabase/supabase-js';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
-import { db } from '../lib/rxdb';
 import { User } from '../types/index';
+import { db } from '../lib/rxdb';
 
 interface AuthState {
   session: Session | null;
@@ -15,6 +15,29 @@ interface AuthState {
   initialize: () => Promise<void>;
   setUiLocked: (locked: boolean) => void;
 }
+
+const fetchUserProfile = async (userId: string, email: string): Promise<User | null> => {
+  try {
+    // 1. Try Supabase
+    const { data: profile, error } = await supabase.from('users').select('*').eq('id', userId).single();
+    if (profile && !error) return profile as User;
+
+    // 2. Fallback for Admin
+    if (email === 'admin@kentowlacademy.com') {
+      return { id: userId, email, name: 'System Administrator', role: 'ADMIN', initials: 'SA' } as User;
+    }
+
+    // 3. Try RxDB
+    const localUser = await db?.admin_records?.findOne({
+      selector: { record_type: 'user', id: userId }
+    }).exec();
+    if (localUser) return localUser.toJSON() as User;
+
+  } catch (err) {
+    console.error('🔐 [AuthStore] Profile fetch failed:', err);
+  }
+  return null;
+};
 
 export const useAuthStore = create<AuthState>((set) => ({
   session: null,
@@ -33,12 +56,14 @@ export const useAuthStore = create<AuthState>((set) => ({
     // 1. Authenticate with Supabase
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     
-    // 2. CRITICAL FIX: If login is successful, update the app state to trigger the redirect
     if (data?.session) {
+      // 2. Fetch Profile
+      const profile = await fetchUserProfile(data.session.user.id, email);
+      
       set({ 
         session: data.session, 
         user: data.session.user, 
-        currentUser: data.session.user as unknown as User 
+        currentUser: profile || (data.session.user as unknown as User)
       });
     }
     
@@ -61,34 +86,26 @@ export const useAuthStore = create<AuthState>((set) => ({
     const { data: { session } } = await supabase.auth.getSession();
     
     if (session) {
-      set({ session, user: session.user, currentUser: session.user as unknown as User, isLoading: false });
+      const profile = await fetchUserProfile(session.user.id, session.user.email || '');
+      set({ 
+        session, 
+        user: session.user, 
+        currentUser: profile || (session.user as unknown as User), 
+        isLoading: false 
+      });
     } else {
-      // Fallback for local admin login
-      try {
-        const localUser = await db.admin_records.findOne({
-          selector: { record_type: 'users', email: 'admin@kentowlacademy.com' }
-        }).exec();
-        
-        if (localUser) {
-          const userObj = localUser.toJSON() as User;
-          set({ 
-            session: { user: userObj, access_token: 'local', refresh_token: 'local', expires_in: 3600, token_type: 'bearer' } as unknown as Session, 
-            user: userObj as unknown as SupabaseUser, 
-            currentUser: userObj, 
-            isLoading: false 
-          });
-        } else {
-          set({ isLoading: false });
-        }
-      } catch {
-        set({ isLoading: false });
-      }
+      set({ isLoading: false });
     }
 
-    // 2. CRITICAL FIX: Listen for background auth changes (like token expiration)
-    supabase.auth.onAuthStateChange((_event, newSession) => {
+    // 2. Listen for background auth changes
+    supabase.auth.onAuthStateChange(async (_event, newSession) => {
       if (newSession) {
-        set({ session: newSession, user: newSession.user, currentUser: newSession.user as unknown as User });
+        const profile = await fetchUserProfile(newSession.user.id, newSession.user.email || '');
+        set({ 
+          session: newSession, 
+          user: newSession.user, 
+          currentUser: profile || (newSession.user as unknown as User) 
+        });
       } else {
         set({ session: null, user: null, currentUser: null });
       }
