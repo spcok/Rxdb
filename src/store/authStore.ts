@@ -60,7 +60,38 @@ export const useAuthStore = create<AuthState>((set) => ({
           const mockSession = { user: mockUser, access_token: 'offline-token' } as Session;
           set({ session: mockSession, user: mockUser, currentUser: localUser, isLoading: false });
         } else {
-          set({ session: null, user: null, currentUser: null, isLoading: false });
+          // Bootstrap a local admin if no user exists and Supabase is missing
+          const defaultAdmin: User = {
+            id: 'local-admin-id',
+            email: 'admin@kentowlacademy.com',
+            name: 'Local Administrator',
+            role: UserRole.ADMIN,
+            initials: 'LA',
+            record_type: 'users',
+            permissions: {
+              dashboard: true,
+              dailyLog: true,
+              tasks: true,
+              medical: true,
+              movements: true,
+              safety: true,
+              maintenance: true,
+              settings: true,
+              userManagement: true,
+              flightRecords: true,
+              feedingSchedule: true,
+              attendance: true,
+              holidayApprover: true,
+              attendanceManager: true,
+              missingRecords: true,
+              reports: true,
+              rounds: true
+            }
+          };
+          await database.admin_records.upsert(defaultAdmin);
+          const mockUser = { id: defaultAdmin.id, email: defaultAdmin.email } as SupabaseUser;
+          const mockSession = { user: mockUser, access_token: 'offline-token' } as Session;
+          set({ session: mockSession, user: mockUser, currentUser: defaultAdmin, isLoading: false });
         }
       } catch (err) {
         console.error('🛠️ [Auth Store] Local fallback failed:', err);

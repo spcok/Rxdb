@@ -24,19 +24,20 @@ export let db: RxDatabase;
 let dbPromise: Promise<RxDatabase> | null = null;
 let replicationStates: RxSupabaseReplicationState<unknown>[] = [];
 
-const createSchema = (name: string, properties: Record<string, unknown> = {}) => ({
+const createSchema = (name: string, properties: Record<string, unknown> = {}): any => ({
   title: `${name} schema`,
   version: 0,
   primaryKey: 'id',
   type: 'object',
   properties: {
-    id: { type: 'string', maxLength: 100 }, // Corrected: No 'primary: true'
+    id: { type: 'string', maxLength: 100 },
     updated_at: { type: 'string' },
     is_deleted: { type: 'boolean' },
     record_type: { type: 'string' }, // The Discriminator
     ...properties
   },
-  required: ['id', 'record_type']
+  required: ['id', 'record_type'],
+  additionalProperties: true // Allow flexible fields for the Librarian architecture
 });
 
 export const initDatabase = async () => {
@@ -44,7 +45,7 @@ export const initDatabase = async () => {
 
   dbPromise = (async () => {
     db = await createRxDatabase({
-      name: 'animaldb_v6', // New name to avoid old schema conflicts
+      name: 'animaldb_v7', // New name to avoid old schema conflicts
       storage: wrappedValidateAjvStorage({ storage: getRxStorageDexie() }),
       ignoreDuplicate: true,
     });

@@ -1,33 +1,20 @@
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-let supabaseInstance: SupabaseClient | null = null;
+// Debugging: These will help you verify if AI Studio is passing the keys
+console.log('🛠️ [Supabase Config] URL Found:', !!supabaseUrl);
+console.log('🛠️ [Supabase Config] Key Found:', !!supabaseAnonKey);
 
-if (supabaseUrl && supabaseAnonKey) {
-  supabaseInstance = createClient(supabaseUrl, supabaseAnonKey);
+if (!supabaseUrl || !supabaseAnonKey) {
+  console.info('ℹ️ [Supabase] Environment variables are missing. The application will operate in Offline Mode.');
 }
 
-// Helper to check if Supabase is configured
-export const isSupabaseConfigured = () => !!supabaseInstance;
+// Create the client (it will be null-safe even if variables are missing)
+export const supabase = createClient(
+  supabaseUrl || 'https://placeholder.supabase.co', 
+  supabaseAnonKey || 'placeholder'
+);
 
-/**
- * Lazy-loaded Supabase client.
- * Throws a descriptive error only when accessed if environment variables are missing.
- */
-export const supabase: SupabaseClient = new Proxy({} as SupabaseClient, {
-  get(_, prop) {
-    if (!supabaseInstance) {
-      const msg = 'CRITICAL: Supabase environment variables are missing! The application cannot initialize.\n' +
-        'Please ensure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are set in your environment.';
-      console.error(msg);
-      throw new Error(msg);
-    }
-    const value = (supabaseInstance as unknown as Record<string, unknown>)[prop as string];
-    if (typeof value === 'function') {
-      return value.bind(supabaseInstance);
-    }
-    return value;
-  }
-});
+export const isSupabaseConfigured = () => !!supabaseUrl && !!supabaseAnonKey;

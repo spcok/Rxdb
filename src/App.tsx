@@ -82,8 +82,8 @@ export default function App() {
     <ErrorBoundary>
       <AppProvider>
         {supabaseError && (
-          <div className="fixed top-0 left-0 right-0 z-[9999] bg-red-600 text-white text-[10px] py-1 px-4 text-center font-bold uppercase tracking-widest animate-pulse">
-            ⚠️ {supabaseError}
+          <div className="fixed top-0 left-0 right-0 z-[9999] bg-emerald-600/90 backdrop-blur-sm text-white text-[9px] py-1 px-4 text-center font-bold uppercase tracking-widest">
+            ℹ️ Running in Offline Mode (Local Database)
           </div>
         )}
         <LockScreen />

@@ -1,17 +1,23 @@
 import React, { useState } from 'react';
 import { useAuthStore } from '../../store/authStore';
-import { Loader2, ShieldCheck, Mail, Lock, Bird } from 'lucide-react';
+import { Loader2, ShieldCheck, Mail, Lock, Bird, WifiOff } from 'lucide-react';
 import { motion } from 'motion/react';
+import { isSupabaseConfigured } from '../../lib/supabase';
 
 const LoginScreen: React.FC = () => {
-  const { login } = useAuthStore();
+  const { login, initialize } = useAuthStore();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const isConfigured = isSupabaseConfigured();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isConfigured) {
+      setError('Supabase is not configured. Please use Offline Mode or configure environment variables.');
+      return;
+    }
     setIsSubmitting(true);
     setError(null);
 
@@ -22,6 +28,19 @@ const LoginScreen: React.FC = () => {
       }
     } catch {
       setError('An unexpected error occurred. Please try again later.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleOfflineMode = async () => {
+    setIsSubmitting(true);
+    try {
+      // Re-run initialize which handles the offline fallback
+      await initialize();
+    } catch (err) {
+      setError('Failed to enter offline mode.');
+      console.error(err);
     } finally {
       setIsSubmitting(false);
     }
@@ -52,6 +71,27 @@ const LoginScreen: React.FC = () => {
             </p>
           </div>
 
+          {!isConfigured && (
+            <div className="mb-8 p-6 bg-emerald-500/10 border border-emerald-500/20 rounded-[2rem] shadow-xl shadow-emerald-500/5">
+              <div className="flex items-center gap-3 mb-3">
+                <WifiOff size={20} className="text-emerald-500" />
+                <p className="text-xs font-black text-emerald-500 uppercase tracking-widest">
+                  Ready for Offline Use
+                </p>
+              </div>
+              <p className="text-[11px] text-slate-400 leading-relaxed mb-6">
+                Supabase is not configured yet. You can start using the system immediately in <strong>Offline Mode</strong>. Your data will be saved locally in your browser.
+              </p>
+              <button
+                onClick={handleOfflineMode}
+                className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl font-black uppercase tracking-widest text-xs transition-all shadow-lg shadow-emerald-900/20 active:scale-[0.98] flex items-center justify-center gap-3"
+              >
+                <ShieldCheck size={18} />
+                Continue to Dashboard
+              </button>
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} className="space-y-6">
             <div className="space-y-2">
               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
@@ -64,10 +104,11 @@ const LoginScreen: React.FC = () => {
                 <input
                   type="email"
                   required
+                  disabled={!isConfigured}
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="name@kentowlacademy.com"
-                  className="block w-full pl-12 pr-4 py-4 bg-slate-950/50 border border-white/5 rounded-2xl text-white placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500/50 transition-all"
+                  className="block w-full pl-12 pr-4 py-4 bg-slate-950/50 border border-white/5 rounded-2xl text-white placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500/50 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                 />
               </div>
             </div>
@@ -83,10 +124,11 @@ const LoginScreen: React.FC = () => {
                 <input
                   type="password"
                   required
+                  disabled={!isConfigured}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
-                  className="block w-full pl-12 pr-4 py-4 bg-slate-950/50 border border-white/5 rounded-2xl text-white placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500/50 transition-all"
+                  className="block w-full pl-12 pr-4 py-4 bg-slate-950/50 border border-white/5 rounded-2xl text-white placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500/50 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                 />
               </div>
             </div>
@@ -103,7 +145,7 @@ const LoginScreen: React.FC = () => {
 
             <button
               type="submit"
-              disabled={isSubmitting}
+              disabled={isSubmitting || !isConfigured}
               className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:cursor-not-allowed text-white rounded-2xl font-black uppercase tracking-widest text-xs transition-all shadow-lg shadow-emerald-900/20 active:scale-[0.98] flex items-center justify-center gap-3"
             >
               {isSubmitting ? (
