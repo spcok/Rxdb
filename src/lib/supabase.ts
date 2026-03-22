@@ -12,6 +12,10 @@ export const supabase = createClient(
   SUPABASE_URL || 'https://placeholder.supabase.co',
   SUPABASE_ANON_KEY || 'placeholder',
   {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+    },
     realtime: {
       params: {
         eventsPerSecond: 10,
@@ -19,3 +23,10 @@ export const supabase = createClient(
     },
   }
 );
+
+// Verify Realtime module is present
+if (typeof (supabase as { channel?: unknown }).channel !== 'function') {
+  console.error('🚨 [Supabase] Realtime module failed to initialize! .channel() is missing.');
+} else {
+  console.log('✅ [Supabase] Realtime module initialized.');
+}

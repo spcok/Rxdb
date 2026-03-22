@@ -68,29 +68,65 @@ export const initDatabase = async () => {
   return dbPromise;
 };
 
-export const startReplication = async (database: RxDatabase) => {
-  if (!database || !supabase || typeof supabase.channel !== 'function') return;
+export const startReplication = async (database: RxDatabase, supabaseClient?: unknown) => {
+  const client = (supabaseClient as { channel?: unknown, realtime?: unknown }) || supabase;
+  
+  if (!database || !client) {
+    console.warn('⚠️ [Sync] Skipping: Database or Supabase client missing.');
+    return;
+  }
+
+  // Robust check for Realtime module - replicateSupabase depends on client.realtime
+  if (typeof client.channel !== 'function' || !client.realtime) {
+    console.warn('⚠️ [Sync] Skipping: Supabase Realtime module not ready yet.');
+    return;
+  }
+
+  if (replicationStates.length > 0) {
+    console.log('🔄 [Sync] Replication already active. Skipping restart.');
+    return;
+  }
+
+  console.log('🔄 [Sync] Starting replication (v18)...');
+  
+  // Brief delay to ensure internal Supabase state is settled
   await new Promise(res => setTimeout(res, 500));
+
   for (const [colName, configs] of Object.entries(REPLICATION_CONFIG)) {
     const collection = database.collections[colName];
     if (!collection) continue;
+
     for (const config of configs) {
       try {
-        const state = replicateSupabase({
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const state = (replicateSupabase as any)({
           collection,
           replicationIdentifier: `repl_${colName}_${config.table}_v18`, 
-          supabaseClient: supabase,
+          supabaseClient: client,
           table: config.table,
           deletedField: 'is_deleted',
-          pull: { batchSize: 100, modifier: (doc) => ({ ...doc, record_type: config.record_type }) },
-          push: { filter: (doc) => doc.record_type === config.record_type },
+          pull: { 
+            batchSize: 100, 
+            modifier: (doc) => ({ ...doc, record_type: config.record_type }) 
+          },
+          push: { 
+            modifier: (doc) => doc.record_type === config.record_type ? doc : null
+          },
           live: true
         });
-        state.error$.subscribe((err: any) => {
-          if (!err?.message?.includes('channel')) console.error(`⚠️ [Sync] ${config.table}:`, err);
+
+        state.error$.subscribe((err: unknown) => {
+          // Filter out benign channel errors during initialization/reconnection
+          const error = err as { message?: string };
+          if (!error?.message?.includes('channel')) {
+            console.error(`⚠️ [Sync Error] ${config.table}:`, err);
+          }
         });
+
         replicationStates.push(state);
-      } catch (err) {}
+      } catch (err) {
+        console.error(`🚨 [Sync] Failed to setup replication for ${config.table}:`, err);
+      }
     }
   }
 };

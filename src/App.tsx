@@ -41,6 +41,7 @@ export default function App() {
   useInactivityTimer();
 
   const handleEmergencyReset = () => {
+    window.indexedDB.deleteDatabase('animaldb_v18');
     window.indexedDB.deleteDatabase('animaldb_v16');
     window.location.reload();
   };
@@ -55,12 +56,20 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    let isMounted = true;
+    
     if (db && session && isSupabaseConfigured()) {
-      startReplication(db, supabase);
+      console.log('🚀 [App] Conditions met for replication. Starting...');
+      startReplication(db, supabase).then(() => {
+        if (!isMounted) stopReplication();
+      });
     } else {
+      console.log('🛑 [App] Conditions not met for replication. Stopping...');
       stopReplication();
     }
+
     return () => {
+      isMounted = false;
       stopReplication();
     };
   }, [db, session]);
