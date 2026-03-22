@@ -53,12 +53,12 @@ const REPLICATION_CONFIG: Record<string, { table: string, record_type: string }[
     { table: 'operational_lists', record_type: 'operational_lists' }
   ],
   admin_records: [
-    { table: 'users', record_type: 'user' },
-    { table: 'organisations', record_type: 'organisation' },
-    { table: 'role_permissions', record_type: 'role_permission' },
-    { table: 'contacts', record_type: 'contact' },
-    { table: 'zla_documents', record_type: 'zla_document' },
-    { table: 'bug_reports', record_type: 'bug_report' }
+    { table: 'users', record_type: 'users' },
+    { table: 'organisations', record_type: 'organisations' },
+    { table: 'role_permissions', record_type: 'role_permissions' },
+    { table: 'contacts', record_type: 'contacts' },
+    { table: 'zla_documents', record_type: 'zla_documents' },
+    { table: 'bug_reports', record_type: 'bug_reports' }
   ],
   tasks: [
     { table: 'tasks', record_type: 'tasks' }
@@ -68,6 +68,7 @@ const REPLICATION_CONFIG: Record<string, { table: string, record_type: string }[
 const baseProperties = {
   id: { type: 'string', maxLength: 100 },
   updated_at: { type: 'string' },
+  created_at: { type: 'string' },
   is_deleted: { type: 'boolean' },
   record_type: { type: 'string' }
 };
@@ -79,7 +80,7 @@ export const initDatabase = async () => {
     
     try {
       db = await createRxDatabase({
-        name: 'animaldb_v15', 
+        name: 'animaldb_v16', 
         storage: wrappedValidateAjvStorage({ storage: getRxStorageDexie() }),
         ignoreDuplicate: true,
       });
@@ -351,11 +352,12 @@ export const startReplication = async (database: RxDatabase) => {
     for (const config of configs) {
       const state = replicateSupabase({
         collection,
-        replicationIdentifier: `${colName}_${config.table}`,
+        replicationIdentifier: `${colName}_${config.table}_v3`,
         client: supabase,
         tableName: config.table,
         pull: { batchSize: 100, modifier: (doc) => ({ ...doc, record_type: config.record_type }) },
-        push: { modifier: (doc) => doc.record_type === config.record_type ? doc : null },
+        // @ts-expect-error - filter is supported by replicateSupabase but missing from types
+        push: { filter: (doc) => doc.record_type === config.record_type },
         live: true
       });
       replicationStates.push(state);

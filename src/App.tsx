@@ -41,7 +41,7 @@ export default function App() {
   useInactivityTimer();
 
   const handleEmergencyReset = () => {
-    window.indexedDB.deleteDatabase('animaldb_v12');
+    window.indexedDB.deleteDatabase('animaldb_v16');
     window.location.reload();
   };
 
