@@ -1,6 +1,6 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { useAuthStore } from '../store/authStore';
-import { UserRole, RolePermissionConfig } from '../types';
+import { UserRole, RolePermissionConfig } from '../types/index';
 import { db } from '../lib/rxdb';
 import { supabase } from '../lib/supabase';
 
@@ -9,37 +9,36 @@ export function usePermissions() {
   const [rolePermissions, setRolePermissions] = useState<RolePermissionConfig | null>(null);
 
   useEffect(() => {
-    async function fetchPermissions() {
-      if (!currentUser?.role || !db) {
-        setRolePermissions(null);
-        return;
-      }
-
-      // Try local RxDB first
-      const localPermissions = await db.admin_records.findOne({
-        selector: { record_type: 'role_permissions', role: currentUser.role }
-      }).exec();
-
-      if (localPermissions) {
-        setRolePermissions(localPermissions.toJSON() as RolePermissionConfig);
-      } else {
-        // Fallback to Supabase
-        const { data, error } = await supabase
-          .from('admin_records')
-          .select('*')
-          .eq('record_type', 'role_permissions')
-          .eq('role', currentUser.role)
-          .single();
-
-        if (data && !error) {
-          setRolePermissions(data as RolePermissionConfig);
-        } else {
-          setRolePermissions(null);
+    let isMounted = true;
+    
+    const fetchPermissions = async () => {
+      if (!currentUser?.role) return;
+      
+      try {
+        if (db?.admin_records) {
+          const localDoc = await db.admin_records.findOne({
+            selector: { record_type: 'role_permissions', role: currentUser.role }
+          }).exec();
+          
+          if (localDoc && isMounted) {
+            setRolePermissions(localDoc.toJSON() as RolePermissionConfig);
+            return;
+          }
         }
+      } catch (err) {
+        console.warn('Local permissions fetch failed', err);
       }
-    }
+
+      try {
+        const { data } = await supabase.from('role_permissions').select('*').eq('role', currentUser.role).single();
+        if (data && isMounted) setRolePermissions(data as RolePermissionConfig);
+      } catch (err) {
+        console.error('Remote permissions fetch failed', err);
+      }
+    };
 
     fetchPermissions();
+    return () => { isMounted = false; };
   }, [currentUser?.role]);
 
   const permissions = useMemo(() => {
@@ -53,69 +52,31 @@ export function usePermissions() {
         isSeniorKeeper: false,
         isVolunteer: false,
         isStaff: true,
-        // Granular Permissions
-        view_animals: true,
-        add_animals: true,
-        edit_animals: true,
-        archive_animals: true,
-        view_daily_logs: true,
-        create_daily_logs: true,
-        edit_daily_logs: true,
-        view_tasks: true,
-        complete_tasks: true,
-        manage_tasks: true,
-        view_daily_rounds: true,
-        log_daily_rounds: true,
-        view_medical: true,
-        add_clinical_notes: true,
-        prescribe_medications: true,
-        administer_medications: true,
-        manage_quarantine: true,
-        view_movements: true,
-        log_internal_movements: true,
-        manage_external_transfers: true,
-        view_incidents: true,
-        report_incidents: true,
-        manage_incidents: true,
-        view_maintenance: true,
-        report_maintenance: true,
-        resolve_maintenance: true,
-        view_safety_drills: true,
-        view_first_aid: true,
-        submit_timesheets: true,
-        manage_all_timesheets: true,
-        request_holidays: true,
-        approve_holidays: true,
-        view_missing_records: true,
-        manage_zla_documents: true,
-        generate_reports: true,
-        view_settings: true,
-        manage_users: true,
-        manage_roles: true,
-        // Compatibility aliases
-        canViewAnimals: true,
-        canEditAnimals: true,
-        canViewMedical: true,
-        canEditMedical: true, // This is fine for Admin/Owner
-        canViewReports: true,
-        canManageStaff: true,
-        canEditSettings: true,
-        canViewSettings: true,
-        canGenerateReports: true,
-        canManageUsers: true,
-        canViewMovements: true,
-        canEditMovements: true,
+        view_animals: true, add_animals: true, edit_animals: true, archive_animals: true,
+        view_daily_logs: true, create_daily_logs: true, edit_daily_logs: true,
+        view_tasks: true, complete_tasks: true, manage_tasks: true,
+        view_daily_rounds: true, log_daily_rounds: true,
+        view_medical: true, add_clinical_notes: true, prescribe_medications: true, administer_medications: true, manage_quarantine: true,
+        view_movements: true, log_internal_movements: true, manage_external_transfers: true,
+        view_incidents: true, report_incidents: true, manage_incidents: true,
+        view_maintenance: true, report_maintenance: true, resolve_maintenance: true,
+        view_safety_drills: true, view_first_aid: true,
+        submit_timesheets: true, manage_all_timesheets: true,
+        request_holidays: true, approve_holidays: true,
+        view_missing_records: true, manage_zla_documents: true, generate_reports: true,
+        view_settings: true, manage_users: true, manage_roles: true,
+        canViewAnimals: true, canEditAnimals: true, canViewMedical: true, canEditMedical: true, 
+        canViewReports: true, canManageStaff: true, canEditSettings: true, canViewSettings: true, 
+        canGenerateReports: true, canManageUsers: true, canViewMovements: true, canEditMovements: true,
         role
       };
     }
 
     return {
-      isAdmin: false,
-      isOwner: false,
+      isAdmin: false, isOwner: false,
       isSeniorKeeper: role === UserRole.SENIOR_KEEPER,
       isVolunteer: role === UserRole.VOLUNTEER,
       isStaff: [UserRole.SENIOR_KEEPER, UserRole.KEEPER].includes(role),
-      // Granular Permissions from DB
       view_animals: rolePermissions?.view_animals ?? false,
       add_animals: rolePermissions?.add_animals ?? false,
       edit_animals: rolePermissions?.edit_animals ?? false,
@@ -154,7 +115,6 @@ export function usePermissions() {
       view_settings: rolePermissions?.view_settings ?? false,
       manage_users: rolePermissions?.manage_users ?? false,
       manage_roles: rolePermissions?.manage_roles ?? false,
-      // Compatibility aliases
       canViewAnimals: rolePermissions?.view_animals ?? false,
       canEditAnimals: rolePermissions?.edit_animals ?? false,
       canViewMedical: rolePermissions?.view_medical ?? false,

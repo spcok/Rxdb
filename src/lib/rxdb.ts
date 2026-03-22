@@ -79,7 +79,7 @@ export const initDatabase = async () => {
     
     try {
       db = await createRxDatabase({
-        name: 'animaldb_v14', 
+        name: 'animaldb_v15', 
         storage: wrappedValidateAjvStorage({ storage: getRxStorageDexie() }),
         ignoreDuplicate: true,
       });
@@ -152,7 +152,9 @@ export const initDatabase = async () => {
               weight_unit: { type: 'string' },
               health_record_type: { type: 'string' },
               shift: { type: 'string' },
-              section: { type: 'string' }
+              section: { type: 'string' },
+              completed_by: { type: 'string' },
+              temperature_c: { type: 'number' }
             }, 
             required: ['id', 'record_type'] 
           } 
@@ -173,7 +175,13 @@ export const initDatabase = async () => {
               medication: { type: 'string' },
               dosage: { type: 'string' },
               frequency: { type: 'string' },
-              status: { type: 'string' }
+              status: { type: 'string' },
+              start_date: { type: 'string' },
+              end_date: { type: 'string' },
+              reason: { type: 'string' },
+              bcs: { type: 'number' },
+              weight: { type: 'number' },
+              isolation_notes: { type: 'string' }
             }, 
             required: ['id', 'record_type'] 
           } 
@@ -194,7 +202,8 @@ export const initDatabase = async () => {
               source_location: { type: 'string' },
               destination_location: { type: 'string' },
               institution: { type: 'string' },
-              status: { type: 'string' }
+              status: { type: 'string' },
+              created_by: { type: 'string' }
             }, 
             required: ['id', 'record_type'] 
           } 
